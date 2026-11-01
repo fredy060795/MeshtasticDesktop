@@ -11,18 +11,29 @@ REM ============================================================================
 setlocal
 cd /d "%~dp0"
 
+REM Kompatible Python-Version suchen (meshtastic unterstuetzt aktuell 3.10 - 3.14,
+REM PyInstaller ebenfalls). Zuerst "python" aus PATH, dann der py-Launcher.
 set PY=
-where py >nul 2>nul && set PY=py -3
-if not defined PY (
-  where python >nul 2>nul && set PY=python
+set "VCHK=import sys; sys.exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)"
+python -c "%VCHK%" >nul 2>nul && set "PY=python"
+for %%V in (3.13 3.12 3.11 3.10) do (
+  if not defined PY (
+    py -%%V -c "%VCHK%" >nul 2>nul && set "PY=py -%%V"
+  )
 )
 if not defined PY (
-  echo [FEHLER] Python wurde nicht gefunden. Bitte von https://www.python.org installieren.
+  echo [FEHLER] Keine passende Python-Version ^(3.10 - 3.13^) gefunden.
+  echo          Bitte Python 3.12 von https://www.python.org installieren ^(Haken bei "Add to PATH"^).
   pause
   exit /b 1
 )
+echo Verwende: %PY%
 
 echo === 1/4  Virtuelle Umgebung anlegen ===
+REM Vorhandene .venv mit falscher Python-Version verwerfen
+if exist .venv (
+  .venv\Scripts\python.exe -c "%VCHK%" >nul 2>nul || rmdir /s /q .venv
+)
 if not exist .venv (
   %PY% -m venv .venv || goto :err
 )
