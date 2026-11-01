@@ -1,0 +1,25 @@
+# Baut die Windows-EXE + Installer automatisch auf GitHub (ohne eigenen Windows-PC).
+# Ergebnis: Actions -> Lauf -> Artifacts "MeshtasticDesktop-Windows"
+name: Windows-Build
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inno Setup installieren
+        run: choco install innosetup -y --no-progress
+      - name: Bauen
+        shell: cmd
+        run: echo.| build.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeshtasticDesktop-Windows
+          path: |
+            Output/MeshtasticDesktop-Setup.exe
+            dist/MeshtasticDesktop-Portable.exe
