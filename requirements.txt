@@ -1,0 +1,7 @@
+meshtastic>=2.7.0
+bleak>=0.22
+pyserial>=3.5
+Pypubsub>=4.0
+protobuf>=4.21
+qrcode>=7.4
+pillow>=10.0
