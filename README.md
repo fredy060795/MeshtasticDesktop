@@ -8,7 +8,7 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 |---|---|
 | **USB / Seriell** | COM-Port wählen (🔄 Suchen) oder leer lassen für automatische Erkennung |
 | **WLAN / TCP** | IP oder Hostname, z. B. `192.168.1.50` oder `meshtastic.local:4403` |
-| **Bluetooth LE** | 🔄 Suchen (ca. 10 s), dann Gerät wählen. Unter Windows das Gerät **vorher** in den Bluetooth-Einstellungen koppeln (PIN meist `123456`) |
+| **Bluetooth LE** | 🔄 Suchen (ca. 10 s), dann Gerät wählen. Alternativ Adresse oder Gerätename eintippen (z. B. `AA:BB:CC:DD:EE:FF`, `BLE:Meshtastic_ab12`), Groß-/Kleinschreibung egal. „(erstes gefundenes Gerät)“ verbindet mit dem ersten Meshtastic-Gerät in Reichweite. Unter Windows das Gerät ggf. vorher in den Bluetooth-Einstellungen koppeln (PIN am Display, oft `123456`) |
 
 ## Funktionen
 - **💬 Chats**: alle Kanäle (Gruppen) und Direktnachrichten. Zeigt Empfangsbestätigung (✓/✗), SNR/RSSI und ungelesene Nachrichten. Verlauf wird lokal gespeichert, CSV-Export.
@@ -51,6 +51,7 @@ python app.py
 ## Hinweise
 - USB-Treiber: Manche Boards brauchen den CP210x- oder CH340-Treiber von Silabs bzw. WCH.
 - Pro Gerät ist immer nur **eine** Verbindung gleichzeitig möglich. Handy-App oder Web-Client vorher trennen.
+- Absturzprotokoll bei Fehlern in Treibern (z. B. Bluetooth): `%APPDATA%\MeshtasticDesktop\crash.log`, App-Log: `app.log`.
 - Optional können QR-Codes aus Bilddateien eingelesen werden: `pip install opencv-python-headless`.
 
 ## Kartendaten

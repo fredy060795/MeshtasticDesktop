@@ -16,6 +16,9 @@ für PNG-Export). Start:  python app.py
 """
 import base64
 import datetime as _dt
+import faulthandler
+import io
+import re
 import json
 import logging
 import os
@@ -29,7 +32,31 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Meshtastic Desktop"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
+
+
+class _NullStream(io.TextIOBase):
+    """Ersatz für sys.stdout/stderr in der EXE ohne Konsole (PyInstaller --windowed).
+
+    Dort sind sys.stdout/sys.stderr None. Die Meshtastic-BLE-Schnittstelle ruft bei jeder
+    Bluetooth-Operation sys.stdout.flush() auf – ohne diesen Ersatz scheitert jede
+    BLE-Verbindung mit "'NoneType' object has no attribute 'flush'".
+    """
+
+    def write(self, s):
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
+if sys.stdout is None:
+    sys.stdout = _NullStream()
+if sys.stderr is None:
+    sys.stderr = _NullStream()
 
 
 def _mt_version():
@@ -56,12 +83,57 @@ except Exception as exc:  # pragma: no cover
           "  pip install -r requirements.txt\n", exc)
     raise
 
+# Bluetooth LE wird erst bei Bedarf geladen (wie im WinTAK-Gateway): bleak lädt unter Windows
+# native WinRT-Module, die bei manchen Python-/Treiber-Kombinationen den Prozess abstürzen
+# lassen können. Ohne BLE-Nutzung soll das die App nicht treffen.
 try:
-    import meshtastic.ble_interface as _ble
-    HAS_BLE = True
-except Exception:  # bleak fehlt o.ä.
-    _ble = None
+    import importlib.util as _ilu
+    HAS_BLE = _ilu.find_spec("bleak") is not None
+except Exception:
     HAS_BLE = False
+_ble = None
+_ble_error = ""
+
+
+def load_ble():
+    """Lädt meshtastic.ble_interface beim ersten Gebrauch. Gibt das Modul oder None zurück."""
+    global _ble, _ble_error, HAS_BLE
+    if _ble is None and HAS_BLE:
+        try:
+            import meshtastic.ble_interface as mod
+            _ble = mod
+        except Exception as e:  # bleak/WinRT defekt
+            _ble_error = f"{e.__class__.__name__}: {e}"
+            log.exception("BLE-Modul konnte nicht geladen werden")
+            HAS_BLE = False
+    return _ble
+
+
+BLE_MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}$")
+
+
+def norm_ble_id(value):
+    return str(value or "").replace("-", "").replace("_", "").replace(":", "").strip().lower()
+
+
+def parse_ble_target(text, known=None):
+    """Akzeptiert 'Name  –  Adresse', 'BLE:Adresse', MAC, UUID oder Gerätenamen. Leer = erstes Gerät."""
+    text = (text or "").strip()
+    if known and text in known:
+        return known[text]
+    if not text or text.startswith("("):
+        return None
+    if re.match(r"^(COM\d+|/dev/)", text, re.I):   # alter serieller Eintrag
+        return None
+    if "  –  " in text:
+        text = text.split("  –  ")[-1].strip()
+    for prefix in ("ble://", "ble:", "bt://", "bt:"):
+        if text.lower().startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+    if text.lower() in ("ble", "bt", "bluetooth", ""):
+        return None
+    return text
 
 try:
     import qrcode
@@ -103,6 +175,15 @@ logging.basicConfig(
     handlers=[logging.FileHandler(LOG_PATH, encoding="utf-8")],
 )
 log = logging.getLogger("meshdesk")
+
+# Absturzprotokoll für Fehler in nativem Code (z. B. Bluetooth-Treiber, 0xC0000005)
+try:
+    _crash_file = open(os.path.join(DATA_DIR, "crash.log"), "a", encoding="utf-8")
+    _crash_file.write(f"\n--- Start {time.strftime('%Y-%m-%d %H:%M:%S')} (Python {sys.version.split()[0]}) ---\n")
+    _crash_file.flush()
+    faulthandler.enable(file=_crash_file, all_threads=True)
+except Exception:
+    pass
 
 BROADCAST = "^all"
 
@@ -518,17 +599,23 @@ class MeshApp(tk.Tk):
             self.set_status("IP-Adresse oder Hostname eingeben (optional :Port, Standard 4403)")
         else:
             if not HAS_BLE:
-                messagebox.showerror(APP_NAME, "Bluetooth-Unterstützung fehlt (pip install bleak).")
+                messagebox.showerror(APP_NAME, "Bluetooth-Unterstützung fehlt (pip install bleak).\n" + _ble_error)
                 return
             self.scan_btn.configure(state="disabled")
-            self.set_status("Suche Bluetooth-Geräte (ca. 10 s)…")
+            self.set_status("Suche Meshtastic-Bluetooth-Geräte (ca. 10 s)…")
+            self.log_msg("BLE-Suche gestartet …")
 
             def work():
                 try:
-                    devs = _ble.BLEInterface.scan()
-                    self.q.put(("ble_scan", [(d.name or "?", d.address) for d in devs]))
+                    mod = load_ble()
+                    if mod is None:
+                        raise RuntimeError("Bluetooth-Modul nicht verfügbar: " + _ble_error)
+                    devs = mod.BLEInterface.scan()
+                    self.q.put(("ble_scan", [(d.name or "?", d.address) for d in devs if d.address]))
                 except BaseException as e:
-                    self.q.put(("error", f"BLE-Suche fehlgeschlagen: {e}"))
+                    log.exception("BLE-Scan")
+                    self.q.put(("error", f"BLE-Suche fehlgeschlagen: {e.__class__.__name__}: {e}\n\n"
+                                         "Ist Bluetooth am PC eingeschaltet?"))
                     self.q.put(("ble_scan", []))
             threading.Thread(target=work, daemon=True).start()
 
@@ -546,7 +633,10 @@ class MeshApp(tk.Tk):
             if target.startswith("("):
                 target = ""
         elif t == self.CONN_TYPES[2]:
-            target = self.ble_devices.get(target, target.split("  –  ")[-1].strip())
+            if not HAS_BLE:
+                messagebox.showerror(APP_NAME, "Bluetooth-Unterstützung fehlt.\n" + _ble_error)
+                return
+            target = parse_ble_target(target, self.ble_devices) or ""
         if t == self.CONN_TYPES[1] and not target:
             messagebox.showwarning(APP_NAME, "Bitte IP-Adresse / Hostname eingeben.")
             return
@@ -572,11 +662,45 @@ class MeshApp(tk.Tk):
                         port = int(p)
                     iface = meshtastic.tcp_interface.TCPInterface(hostname=host, portNumber=port)
                 else:
-                    iface = _ble.BLEInterface(address=target or None)
+                    iface = self._open_ble(target or None)
                 self.q.put(("connected_iface", iface))
             except BaseException as e:
-                self.q.put(("connect_failed", str(e) or e.__class__.__name__))
+                log.exception("Verbindung fehlgeschlagen")
+                msg = str(e) or e.__class__.__name__
+                if t == self.CONN_TYPES[2]:
+                    msg += ("\n\nTipps für Bluetooth:\n"
+                            "• Gerät in Reichweite und eingeschaltet, Bluetooth am PC an\n"
+                            "• Handy-App / anderen Client vorher trennen (nur eine BLE-Verbindung möglich)\n"
+                            "• Unter Windows das Gerät in den Bluetooth-Einstellungen koppeln (PIN am Display, "
+                            "oft 123456) – bei Problemen dort entfernen und neu koppeln\n"
+                            "• Feld leer lassen = erstes gefundenes Gerät verwenden")
+                self.q.put(("connect_failed", msg))
         threading.Thread(target=work, daemon=True).start()
+
+    def _open_ble(self, target):
+        """BLE-Verbindung wie im WinTAK-Gateway: direkt versuchen; wird das Gerät nicht gefunden,
+        tolerant (Groß-/Kleinschreibung, Trennzeichen, Name oder Adresse) suchen und exakt neu verbinden."""
+        mod = load_ble()
+        if mod is None:
+            raise RuntimeError("Bluetooth-Modul nicht verfügbar: " + _ble_error)
+        cls = mod.BLEInterface
+        self.q.put(("info", f"Suche Bluetooth-Gerät {target or '(erstes gefundenes)'} – Scan dauert ca. 10 s …"))
+        try:
+            return cls(target)
+        except cls.BLEError as exc:
+            if not target:
+                raise
+            wanted = norm_ble_id(target)
+            candidates = []
+            for dev in cls.scan():
+                addr = str(getattr(dev, "address", "") or "")
+                name = str(getattr(dev, "name", "") or "")
+                if wanted in (norm_ble_id(addr), norm_ble_id(name)):
+                    candidates.append(addr)
+            if len(candidates) != 1 or candidates[0] == target:
+                raise exc
+            self.q.put(("info", f"Bluetooth-Gerät '{target}' als {candidates[0]} gefunden, verbinde erneut …"))
+            return cls(candidates[0])
 
     def disconnect(self):
         self._manual_disconnect = True
@@ -659,9 +783,13 @@ class MeshApp(tk.Tk):
         elif kind == "ble_scan":
             self.scan_btn.configure(state="normal")
             self.ble_devices = {f"{n}  –  {a}": a for n, a in ev[1]}
-            self.target_cb["values"] = list(self.ble_devices) or ["(kein Gerät gefunden)"]
+            self.target_cb["values"] = list(self.ble_devices) + ["(erstes gefundenes Gerät)"]
             if self.ble_devices:
                 self.target.set(list(self.ble_devices)[0])
+            else:
+                self.target.set("(erstes gefundenes Gerät)")
+            for k in self.ble_devices:
+                self.log_msg(f"BLE gefunden: {k}")
             self.set_status(f"{len(self.ble_devices)} Bluetooth-Gerät(e) gefunden")
         elif kind == "ack":
             _, pid, status = ev
@@ -2091,7 +2219,7 @@ def main():
             import mapview
             ok_map = len(mapview.VectorData(mapview.resource_path("worldmap.json.gz")).layers["land2"]) > 200
         print(f"{APP_NAME} {APP_VERSION} OK – meshtastic {_mt_version()}, "
-              f"BLE={HAS_BLE}, QR={HAS_QR}, Karte={ok_map}")
+              f"BLE={load_ble() is not None}, QR={HAS_QR}, Karte={ok_map}")
         return
     app = MeshApp()
     app.mainloop()
