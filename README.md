@@ -26,6 +26,17 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 - **🧩 Modul-Einstellungen**: MQTT, Seriell, Ext. Benachrichtigung, Store & Forward, Reichweitentest, Telemetrie, Vorgefertigte Nachrichten, Audio, Remote-Hardware, Nachbar-Info, Umgebungslicht, Erkennungssensor, Paxcounter, Statusnachricht, Traffic-Management und TAK.
   Die Formulare entstehen automatisch aus den Meshtastic-Protobuf-Definitionen. Neue Firmware-Optionen erscheinen deshalb nach einem Update der `meshtastic`-Bibliothek von selbst.
 - **🛠 Gerät**: Besitzername und Kurzname, feste Position, Uhrzeit setzen, vorgefertigte Nachrichten und Klingelton, Neustart, Herunterfahren, Knoten-DB zurücksetzen, Werksreset, DFU-Modus. Dazu **Backup und Wiederherstellung** der kompletten Konfiguration als JSON.
+- **⚡ Firmware-Flasher** (Tab *Firmware* oder eigenständig `MeshtasticFlasher.exe`): flasht Meshtastic-Geräte **offline**, wie flasher.meshtastic.org.
+  - **ESP32 / S3 / C3 / C6** (Heltec, T-Beam, Station G1/G2 …) über `esptool`:
+    - *Update*: Die Einstellungen bleiben erhalten.
+    - *Komplett neu installieren*: Der Flash wird gelöscht, dann werden factory.bin, OTA-App und LittleFS geschrieben, genau wie beim Web-Flasher.
+  - **nRF52840 / RP2040 / RP2350** (RAK4631, T-Echo, Heltec T114, Pico …) über das UF2-Laufwerk:
+    - Das Gerät wird automatisch in den Bootloader versetzt, per Meshtastic-Befehl oder 1200-Baud-Reset.
+    - Bei Neuinstallation wird vorher ein *Factory Erase* ausgeführt.
+  - **Verbundenes Gerät erkennen** wählt das passende Board automatisch aus. **Eigene Datei flashen** erkennt Chip, Image-Art und Version und schlägt die richtige Adresse vor.
+  - **Heltec V2.0**: Die bereitgestellte Firmware 2.7.13 (`firmware_custom/heltec-v2_0`) ist fest eingebaut. Für den Heltec V2 gibt es keine offizielle Firmware mehr.
+  - **Offline-Firmware**: Der Workflow *Firmware-Offline-Pakete* (Actions → Run workflow, außerdem jeden Montag) lädt die neueste stabile Version und die neueste Alpha herunter. Er legt sie unter *Releases* als ZIP je Chip-Familie ab. Im Flasher lassen sie sich über **Online laden…** abrufen oder als ZIP mit **Paket importieren…** einlesen. Danach ist kein Internet mehr nötig.
+- **Hop-Limit**: Es ist auf **1–7** begrenzt, weil höhere Werte den Node abstürzen lassen. Auch beim Wiederherstellen eines Backups wird der Wert begrenzt.
 - **📜 Log**: App-Log und optional das Debug-Log des Geräts.
 
 ## EXE und Installer bauen (Windows)
@@ -36,6 +47,7 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 Ergebnis:
 - `Output\MeshtasticDesktop-Setup.exe`: Installer mit Startmenü, Desktop-Icon und Deinstallation
 - `dist\MeshtasticDesktop-Portable.exe`: eine einzelne Datei, läuft ohne Installation
+- `dist\MeshtasticFlasher.exe`: nur der Firmware-Flasher, als einzelne Datei
 
 Internet braucht nur der Build-Schritt (pip). Die fertige EXE läuft komplett offline.
 
@@ -56,3 +68,7 @@ python app.py
 
 ## Kartendaten
 `worldmap.json.gz` wurde mit `tools_build_worldmap.py` aus [Natural Earth](https://www.naturalearthdata.com/) erzeugt (gemeinfrei).
+
+## Treiber für den Flasher
+- ESP32-Boards mit CP210x (Heltec V2, viele T-Beams) brauchen den Silabs-CP210x-Treiber, Boards mit CH340/CH9102 den WCH-Treiber.
+- Lässt sich ein ESP32 nicht verbinden: Baudrate auf 115200 stellen, ein Datenkabel nutzen (kein reines Ladekabel), oder die BOOT/PRG-Taste halten und kurz RST drücken.

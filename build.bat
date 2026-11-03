@@ -45,8 +45,10 @@ pip install -r requirements.txt pyinstaller || goto :err
 
 echo === Selbsttest ===
 python app.py --selftest || goto :err
+python flasher.py --selftest || goto :err
 
 set COMMON=--noconfirm --clean --windowed --icon icon.ico --add-data "icon.ico;." --add-data "worldmap.json.gz;." ^
+  --add-data "firmware_custom;firmware_custom" --collect-all esptool ^
   --collect-all meshtastic --collect-all bleak --collect-all winrt --collect-all bleak_winrt ^
   --collect-all pubsub --collect-submodules serial --hidden-import qrcode --hidden-import PIL.Image ^
   --exclude-module matplotlib --exclude-module numpy.tests
@@ -54,6 +56,9 @@ set COMMON=--noconfirm --clean --windowed --icon icon.ico --add-data "icon.ico;.
 echo === 3/4  EXE bauen (Ordner + Portable) ===
 pyinstaller %COMMON% --name MeshtasticDesktop app.py || goto :err
 pyinstaller %COMMON% --onefile --name MeshtasticDesktop-Portable app.py || goto :err
+pyinstaller --noconfirm --clean --windowed --onefile --icon icon.ico --add-data "icon.ico;." ^
+  --add-data "firmware_custom;firmware_custom" --collect-all esptool --collect-submodules serial ^
+  --name MeshtasticFlasher flasher.py || goto :err
 
 echo === 4/4  Installer bauen (Inno Setup 6) ===
 set ISCC=
@@ -72,6 +77,7 @@ if defined ISCC (
 echo.
 echo Portable EXE:  dist\MeshtasticDesktop-Portable.exe
 echo Ordner-EXE:    dist\MeshtasticDesktop\MeshtasticDesktop.exe
+echo Flasher-EXE:   dist\MeshtasticFlasher.exe
 pause
 exit /b 0
 

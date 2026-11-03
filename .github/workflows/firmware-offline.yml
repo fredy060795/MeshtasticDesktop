@@ -1,0 +1,44 @@
+# Lädt die aktuellen Meshtastic-Firmware-Versionen herunter und stellt sie als
+# Offline-Pakete (ZIP je Chip-Familie) unter "Releases" dieses Repos bereit.
+# Im Flasher der App: "Online laden…" oder ZIP herunterladen und "Paket importieren…".
+name: Firmware-Offline-Pakete
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Versionen (kommagetrennt, z. B. 2.8.2.4c89b69) – leer = neueste stabile + neueste Alpha"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * 1"   # jeden Montag
+permissions:
+  contents: write
+concurrency:
+  group: firmware-offline
+  cancel-in-progress: false
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Firmware herunterladen und packen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/fetch_firmware.py --out out --work "$RUNNER_TEMP" --versions "${{ github.event.inputs.versions }}"
+      - name: Als Releases veröffentlichen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          for v in $(cat out/versions.txt); do
+            tag="fw-$v"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" out/$v/*.zip out/$v/index.json --clobber
+              gh release edit "$tag" --notes-file "out/$v/release.md"
+            else
+              ch=$(python3 -c "import json;print(json.load(open('out/$v/index.json'))['channel'])")
+              gh release create "$tag" out/$v/*.zip out/$v/index.json \
+                --title "Meshtastic Firmware $v ($ch) – Offline-Paket" \
+                --notes-file "out/$v/release.md" --latest=false
+            fi
+          done

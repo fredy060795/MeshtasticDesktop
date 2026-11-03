@@ -3,6 +3,8 @@
 name: Windows-Build
 on:
   push:
+    paths-ignore:
+      - "README.md"
   workflow_dispatch:
 jobs:
   build:
@@ -23,3 +25,4 @@ jobs:
           path: |
             Output/MeshtasticDesktop-Setup.exe
             dist/MeshtasticDesktop-Portable.exe
+            dist/MeshtasticFlasher.exe

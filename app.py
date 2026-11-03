@@ -32,7 +32,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Meshtastic Desktop"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 
 class _NullStream(io.TextIOBase):
@@ -141,6 +141,13 @@ try:
 except Exception:
     qrcode = None
     HAS_QR = False
+
+try:
+    from flasher import FlasherFrame
+    HAS_FLASHER = True
+except Exception:  # pragma: no cover
+    FlasherFrame = None
+    HAS_FLASHER = False
 
 try:
     from mapview import OfflineMap
@@ -345,10 +352,18 @@ class ScrollFrame(ttk.Frame):
 # --------------------------------------------------------------------------------------
 # Generisches Protobuf-Formular (für ALLE Einstellungen)
 # --------------------------------------------------------------------------------------
+# Feste Grenzen für einzelne Felder: (Abschnitt, Feld) -> (min, max, Hinweis)
+FIELD_LIMITS = {
+    ("lora", "hop_limit"): (1, 7, "1–7 · höhere Werte bringen den Node zum Absturz"),
+}
+HOP_LIMIT_MAX = 7
+
+
 class ProtoForm:
     """Erzeugt aus einer Protobuf-Nachricht automatisch ein Eingabeformular."""
 
-    def __init__(self, parent, msg):
+    def __init__(self, parent, msg, section=""):
+        self.section = section
         self.fields = []  # (path, fd, var, kind)
         self.frame = ttk.Frame(parent)
         self.frame.columnconfigure(1, weight=1)
@@ -418,6 +433,14 @@ class ProtoForm:
                                command=lambda e=e: e.configure(show="" if e.cget("show") else "•")).grid(
                         row=r, column=2, sticky="w")
                 kind = "str"
+            elif (self.section, ".".join(p)) in FIELD_LIMITS:
+                lo, hi, hint = FIELD_LIMITS[(self.section, ".".join(p))]
+                var = tk.StringVar(value=str(val))
+                ttk.Spinbox(parent, from_=lo, to=hi, textvariable=var, width=6, state="readonly"
+                            if lo <= val <= hi else "normal").grid(row=r, column=1, sticky="w", padx=4)
+                ttk.Label(parent, text=f"({hint})", foreground="#a33" if not lo <= val <= hi else "gray").grid(
+                    row=r, column=2, sticky="w")
+                kind = "int"
             else:
                 var = tk.StringVar(value=str(val))
                 ttk.Entry(parent, textvariable=var).grid(row=r, column=1, sticky="ew", padx=4)
@@ -445,7 +468,11 @@ class ProtoForm:
                     setattr(target, name, fd.enum_type.values_by_name[v].number if v in
                             fd.enum_type.values_by_name else int(v))
                 elif kind == "int":
-                    setattr(target, name, int(str(v).strip() or 0, 0))
+                    iv = int(str(v).strip() or 0, 0)
+                    lim = FIELD_LIMITS.get((self.section, ".".join(path)))
+                    if lim and not lim[0] <= iv <= lim[1]:
+                        raise ValueError(f"erlaubt ist {lim[0]} bis {lim[1]} ({lim[2]})")
+                    setattr(target, name, iv)
                 elif kind == "float":
                     setattr(target, name, float(str(v).replace(",", ".").strip() or 0))
                 elif kind == "str":
@@ -518,6 +545,7 @@ class MeshApp(tk.Tk):
         self._build_config_tab("config", "Geräte-Einstellungen")
         self._build_config_tab("module", "Modul-Einstellungen")
         self._build_device_tab()
+        self._build_flasher_tab()
         self._build_log_tab()
 
         self.statusbar = ttk.Label(self, text="Nicht verbunden", style="Status.TLabel", relief="sunken")
@@ -712,6 +740,13 @@ class MeshApp(tk.Tk):
         self.me_label.configure(text="")
         self.set_status("Getrennt")
         self.log_msg("Verbindung getrennt.")
+
+    def _disconnect_sync(self):
+        """Trennt sofort und schließt den Port (für den Firmware-Flasher)."""
+        iface = self.iface
+        self.disconnect()
+        if iface is not None:
+            self._safe_close(iface)
 
     @staticmethod
     def _safe_close(iface):
@@ -1283,7 +1318,7 @@ class MeshApp(tk.Tk):
         nid = self.sel_node()
         if not nid:
             return
-        hop = self.iface.localNode.localConfig.lora.hop_limit or 3
+        hop = min(max(self.iface.localNode.localConfig.lora.hop_limit or 3, 1), HOP_LIMIT_MAX)
         self.set_status(f"Traceroute zu {self.node_name(nid)} gesendet … (kann bis zu 1 min dauern)")
 
         def fmt(num):
@@ -1761,7 +1796,7 @@ class MeshApp(tk.Tk):
             if fd.name == "version" or fd.type != FieldDescriptor.TYPE_MESSAGE:
                 continue
             sf = ScrollFrame(nb)
-            form = ProtoForm(sf.inner, getattr(root, fd.name))
+            form = ProtoForm(sf.inner, getattr(root, fd.name), section=fd.name)
             form.frame.pack(fill="both", expand=True, padx=6, pady=6)
             nb.add(sf, text=SECTION_DE.get(fd.name, pretty(fd.name)))
             forms[fd.name] = form
@@ -2086,6 +2121,8 @@ class MeshApp(tk.Tk):
                             is_licensed=bool(o.get("is_licensed")))
             if data.get("config"):
                 json_format.ParseDict(data["config"], ln.localConfig, ignore_unknown_fields=True)
+                if not 1 <= ln.localConfig.lora.hop_limit <= HOP_LIMIT_MAX:
+                    ln.localConfig.lora.hop_limit = min(max(ln.localConfig.lora.hop_limit, 1), HOP_LIMIT_MAX)
                 for fd in ln.localConfig.DESCRIPTOR.fields:
                     if fd.name != "version" and ln.localConfig.HasField(fd.name):
                         self.write_section("config", fd.name)
@@ -2106,6 +2143,14 @@ class MeshApp(tk.Tk):
             ln.commitSettingsTransaction()
             return "Backup wiederhergestellt"
         self.run_bg(work, ok_msg=lambda r: r, popup=True)
+
+    # ==================================================================== FIRMWARE-FLASHER
+    def _build_flasher_tab(self):
+        if not HAS_FLASHER:
+            return
+        self.flasher = FlasherFrame(self.nb, data_dir=DATA_DIR, settings=self.settings, save_settings=save_settings,
+                                    get_iface=lambda: self.iface, disconnect_app=self._disconnect_sync)
+        self.nb.add(self.flasher, text="⚡ Firmware")
 
     # ==================================================================== LOG
     def _build_log_tab(self):

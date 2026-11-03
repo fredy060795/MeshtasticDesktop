@@ -2,7 +2,7 @@
 ; Wird von build.bat automatisch aufgerufen (ISCC.exe installer.iss)
 
 #define AppName "Meshtastic Desktop"
-#define AppVersion "1.0.0"
+#define AppVersion "1.2.0"
 #define AppExe "MeshtasticDesktop.exe"
 
 [Setup]
@@ -34,9 +34,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "dist\MeshtasticDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\MeshtasticFlasher.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{group}\Meshtastic Flasher (offline)"; Filename: "{app}\MeshtasticFlasher.exe"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
