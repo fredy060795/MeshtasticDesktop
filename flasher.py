@@ -78,6 +78,10 @@ def is_esp(chip):
     return chip.startswith("esp32")
 
 
+def is_uf2_chip(chip):
+    return chip.startswith(("nrf52", "rp2"))
+
+
 def parse_off(v, default=None):
     if v is None:
         return default
@@ -557,7 +561,7 @@ class FlasherFrame(ttk.Frame):
             if cf not in ("", "alle Chips") and chip != cf:
                 continue
             size = sum(f.get("bytes", 0) for f in m.get("files", []) if not str(f.get("name")).endswith(".elf"))
-            method = "esptool" if is_esp(chip) else "UF2-Laufwerk"
+            method = "esptool" if is_esp(chip) else ("UF2-Laufwerk" if is_uf2_chip(chip) else "nicht unterstützt")
             sup = SUPPORT.get(m.get("supportLevel"), "")
             if m.get("custom"):
                 sup = "eigene Datei"
@@ -744,6 +748,11 @@ class FlasherFrame(ttk.Frame):
                 return
             self._prepare_port(port)
             self._start(lambda: self._flash_esp(port, chip, f, mode, name), "Flashe …")
+        elif not is_uf2_chip(chip):
+            messagebox.showinfo(APP_TITLE, f"{name} ({chip}) kann hier nicht geflasht werden.\n\n"
+                                           "STM32-Geräte (z. B. Wio-E5) brauchen einen ST-Link bzw. STM32CubeProgrammer. "
+                                           "Die Firmware-Dateien liegen im Ordner (Knopf „Ordner“).", parent=self)
+            return
         else:
             if not f["uf2"]:
                 messagebox.showerror(APP_TITLE, "Für dieses Gerät gibt es keine .uf2-Datei.", parent=self)
