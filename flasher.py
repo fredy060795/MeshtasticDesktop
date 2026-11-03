@@ -1186,6 +1186,10 @@ def main():
     if sys.stderr is None:
         sys.stderr = _QueueWriter(lambda s: None)
     if "--selftest" in sys.argv:
+        try:   # Windows-Konsole (cp1252) kann nicht alle Zeichen darstellen
+            sys.stdout.reconfigure(errors="replace")
+        except Exception:
+            pass
         import esptool
         lib = FwLibrary(os.path.join(default_data_dir(), "firmware"))
         print(f"{APP_TITLE} OK – esptool {esptool.__version__}, Versionen offline: "

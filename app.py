@@ -2259,6 +2259,10 @@ class QRWindow(tk.Toplevel):
 
 def main():
     if "--selftest" in sys.argv:
+        try:   # Windows-Konsole (cp1252) kann nicht alle Zeichen darstellen
+            sys.stdout.reconfigure(errors="replace")
+        except Exception:
+            pass
         ok_map = False
         if HAS_MAP:
             import mapview
