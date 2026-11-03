@@ -1,0 +1,54 @@
+{
+  "version": "2.7.13.28f53d132",
+  "platformioTarget": "heltec-v2_0",
+  "mcu": "esp32",
+  "architecture": "esp32",
+  "displayName": "Heltec V2.0 (eigene Firmware-Datei)",
+  "hwModelSlug": "HELTEC_V2_0",
+  "hwModel": 5,
+  "supportLevel": 3,
+  "activelySupported": false,
+  "custom": true,
+  "note": "Vom Benutzer bereitgestellte Factory-Datei (Meshtastic 2.7.13, Target heltec-v2_0, ESP-IDF 4.4.7). Offizielle Firmware für Heltec V2 gibt es ab 2.7.15 nicht mehr.",
+  "files": [
+    {
+      "name": "firmware-heltec-v2_0-2.7.13.28f53d132.factory.bin",
+      "md5": "b9629bc49460a8b23fca96dbdbe0376a",
+      "bytes": 2261392
+    }
+  ],
+  "part": [
+    {
+      "name": "nvs",
+      "offset": "0x9000",
+      "size": "0x5000"
+    },
+    {
+      "name": "otadata",
+      "offset": "0xe000",
+      "size": "0x2000"
+    },
+    {
+      "name": "app",
+      "type": "app",
+      "subtype": "ota_0",
+      "offset": "0x10000",
+      "size": "0x250000"
+    },
+    {
+      "name": "flashApp",
+      "type": "app",
+      "subtype": "ota_1",
+      "offset": "0x260000",
+      "size": "0xa0000"
+    },
+    {
+      "name": "spiffs",
+      "type": "data",
+      "subtype": "spiffs",
+      "offset": "0x300000",
+      "size": "0x100000"
+    }
+  ],
+  "partitionScheme": "4MB"
+}

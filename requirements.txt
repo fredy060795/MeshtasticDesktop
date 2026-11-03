@@ -5,3 +5,4 @@ Pypubsub>=4.0
 protobuf>=4.21
 qrcode>=7.4
 pillow>=10.0
+esptool>=4.8
