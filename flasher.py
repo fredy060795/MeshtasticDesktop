@@ -9,6 +9,7 @@ Offline-Firmware-Flasher für Meshtastic-Geräte (wie flasher.meshtastic.org, ab
     - Gerät wird per Meshtastic-Befehl oder 1200-Baud-Reset in den Bootloader versetzt,
       danach wird die .uf2 auf das Laufwerk kopiert (optional vorher "Factory Erase").
 * Eigene Dateien (.bin/.uf2), z. B. Spezial-Firmware für Heltec V2.
+* TAKweb aufs Gerät (ESP32): Mesh-Ausgabe von TAKweb in den Flash, WLAN setzen (takweb.py).
 
 Firmware-Bibliothek: %APPDATA%\\MeshtasticDesktop\\firmware\\<version>\\  (offline)
 Pakete: ZIP-Dateien aus den Releases des Repos (Workflow "Firmware-Offline-Pakete").
@@ -29,7 +30,9 @@ import time
 import tkinter as tk
 import urllib.request
 import zipfile
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+
+import takweb
 
 APP_TITLE = "Meshtastic Flasher (offline)"
 DEFAULT_RELEASE_REPO = "fredy060795/MeshtasticDesktop"
@@ -383,6 +386,7 @@ class FlasherFrame(ttk.Frame):
         self._build()
         self.reload_library()
         self.refresh_ports()
+        self._takweb_load_saved()
         self.after(100, self._poll)
 
     # ------------------------------------------------------------------ Aufbau
@@ -450,6 +454,36 @@ class FlasherFrame(ttk.Frame):
                             "„Komplett neu installieren“. Bei 921600 Baud Fehlern → 115200 wählen.",
                   foreground="gray").grid(row=3, column=0, columnspan=6, sticky="w")
 
+        tw = ttk.LabelFrame(self, text="4. TAKweb aufs Gerät (eigene WLAN-Webseite, nur ESP32)", padding=6)
+        tw.pack(fill="x", pady=(6, 0))
+        ttk.Label(tw, text="Paket:").grid(row=0, column=0, sticky="w")
+        self.lbl_tw = ttk.Label(tw, text="– keins geladen –", foreground="gray")
+        self.lbl_tw.grid(row=0, column=1, columnspan=3, sticky="w", padx=4)
+        ttk.Button(tw, text="📦 Paket (ZIP)…", command=self.takweb_import).grid(row=0, column=4, padx=2)
+        ttk.Button(tw, text="🌐 Vom TAKweb-Server…", command=self.takweb_download).grid(row=0, column=5, padx=2)
+        ttk.Label(tw, text="Hotspot-Name:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.v_tw_ssid = tk.StringVar(value=self.settings.get("takweb_ssid", "TAKweb"))
+        ttk.Entry(tw, textvariable=self.v_tw_ssid, width=22).grid(row=1, column=1, sticky="w", padx=4, pady=(4, 0))
+        ttk.Label(tw, text="Passwort:").grid(row=1, column=2, sticky="e", pady=(4, 0))
+        self.v_tw_psk = tk.StringVar(value=self.settings.get("takweb_psk", "12345678"))
+        ttk.Entry(tw, textvariable=self.v_tw_psk, width=18).grid(row=1, column=3, sticky="w", padx=4, pady=(4, 0))
+        self.v_tw_wifi = tk.BooleanVar(value=self.settings.get("takweb_wifi", True))
+        ttk.Checkbutton(tw, text="WLAN am Gerät setzen", variable=self.v_tw_wifi).grid(
+            row=1, column=4, columnspan=2, sticky="w", pady=(4, 0))
+        self.v_tw_after = tk.BooleanVar(value=self.settings.get("takweb_after", False))
+        ttk.Checkbutton(tw, text="nach dem Flashen (ESP32) automatisch aufspielen", variable=self.v_tw_after).grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self.btn_tw = ttk.Button(tw, text="🗺 TAKweb aufspielen", command=self.takweb_install)
+        self.btn_tw.grid(row=2, column=4, columnspan=2, sticky="e", pady=(4, 0))
+        ttk.Label(tw, text="Danach: Handy-Hotspot mit diesem Namen und Passwort einschalten (iPhone: Hotspot-Name = "
+                           "Gerätename unter Einstellungen → Allgemein → Info → Name; Passwort mind. 8 Zeichen, leer = "
+                           "offenes WLAN). Das Gerät verbindet sich, im Browser https://<IP des Geräts> öffnen (IP auf "
+                           "dem Display oder in der Hotspot-Geräteliste), Zertifikat einmal akzeptieren. "
+                           "Solange WLAN an ist, ist Bluetooth am Gerät aus.",
+                  foreground="gray", wraplength=1000, justify="left").grid(row=3, column=0, columnspan=6, sticky="w",
+                                                                           pady=(4, 0))
+        self.tw_pkg = None
+
         act = ttk.Frame(self)
         act.pack(fill="x", pady=6)
         self.btn_flash = ttk.Button(act, text="⚡ Firmware flashen", command=self.flash_selected)
@@ -486,6 +520,7 @@ class FlasherFrame(ttk.Frame):
                 elif kind == "done":
                     self.busy = False
                     self.btn_flash.configure(state="normal")
+                    self.btn_tw.configure(state="normal")
                     ok, msg = val
                     self.progress["value"] = 100 if ok else self.progress["value"]
                     self.lbl_state.configure(text="✔ Fertig" if ok else "✖ Fehler")
@@ -692,6 +727,7 @@ class FlasherFrame(ttk.Frame):
                 inner()
         self.busy = True
         self.btn_flash.configure(state="disabled")
+        self.btn_tw.configure(state="disabled")
         self.progress["value"] = 0
         self.lbl_state.configure(text=state)
         threading.Thread(target=fn, daemon=True).start()
@@ -747,6 +783,7 @@ class FlasherFrame(ttk.Frame):
             if not messagebox.askyesno(APP_TITLE, txt + "\n\nJetzt flashen?", parent=self):
                 return
             self._prepare_port(port)
+            self._tw_after = self._takweb_params(quiet=True) if self.v_tw_after.get() else None
             self._start(lambda: self._flash_esp(port, chip, f, mode, name), "Flashe …")
         elif not is_uf2_chip(chip):
             messagebox.showinfo(APP_TITLE, f"{name} ({chip}) kann hier nicht geflasht werden.\n\n"
@@ -808,6 +845,12 @@ class FlasherFrame(ttk.Frame):
             self._esptool(args)
             if tmp:
                 os.unlink(tmp.name)
+            after = getattr(self, "_tw_after", None) if not custom_file else None
+            self._tw_after = None
+            if after:
+                self.logmsg("\nFirmware geschrieben – warte auf den Neustart des Geräts, dann kommt TAKweb …\n")
+                self._takweb_work(port, *after, first_wait=8)
+                return
             self.q.put(("done", (True, f"{name} wurde erfolgreich geflasht.\n\nDas Gerät startet neu. "
                                        "Bei Neuinstallation: Region (LoRa) wieder einstellen!")))
         except Exception as e:
@@ -822,6 +865,146 @@ class FlasherFrame(ttk.Frame):
                         "(Datenkabel!) nutzen, oder BOOT/PRG-Taste gedrückt halten und kurz RST drücken.")
             self.logmsg(f"\nFEHLER: {msg}\n")
             self.q.put(("done", (False, f"Flashen fehlgeschlagen:\n{msg}{hint}")))
+
+    # ------------------------------------------------------------------ TAKweb (takweb.py)
+    def _takweb_dir(self):
+        d = os.path.join(self.data_dir, "takweb")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _takweb_set(self, pkg, path=None):
+        self.tw_pkg = pkg
+        if pkg.raw and not path:            # in der Bibliothek ablegen -> später offline da
+            path = os.path.join(self._takweb_dir(), f"takweb-mesh-{re.sub(r'[^\w.-]', '_', pkg.version)}.zip")
+            with open(path, "wb") as fh:
+                fh.write(pkg.raw)
+        if path:
+            self.settings["takweb_pkg"] = path
+            self.save_settings(self.settings)
+        self.lbl_tw.configure(text=f"TAKweb {pkg.version} – {len(pkg.files)} Dateien, {human(pkg.total)} im Flash",
+                              foreground="#335")
+
+    def _takweb_load_saved(self):
+        p = self.settings.get("takweb_pkg")
+        if p and os.path.exists(p):
+            try:
+                self._takweb_set(takweb.Package.from_file(p), p)
+            except Exception as e:
+                self.lbl_tw.configure(text=f"Paket nicht lesbar: {e}", foreground="#a00")
+
+    def takweb_import(self):
+        p = filedialog.askopenfilename(parent=self, title="TAKweb-Paket wählen",
+                                       filetypes=[("TAKweb-Paket", "takweb-mesh*.zip"), ("ZIP", "*.zip")])
+        if not p:
+            return
+        try:
+            self._takweb_set(takweb.Package.from_file(p))
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, str(e), parent=self)
+
+    def takweb_download(self):
+        url = simpledialog.askstring(APP_TITLE, "Adresse des TAKweb-Servers (z. B. https://tak.example.org:8443):",
+                                     initialvalue=self.settings.get("takweb_server", ""), parent=self)
+        if not url:
+            return
+        self.settings["takweb_server"] = url.strip()
+        self.lbl_tw.configure(text="Lade Paket …", foreground="gray")
+
+        def work():
+            try:
+                pkg = takweb.Package.from_server(url)
+                self.q.put(("call", lambda: self._takweb_set(pkg)))
+            except Exception as e:
+                err = str(e)
+                self.q.put(("call", lambda: (self.lbl_tw.configure(text="Nicht geladen", foreground="#a00"),
+                                             messagebox.showerror(APP_TITLE, err, parent=self))))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _takweb_params(self, quiet=False):
+        """(Paket, WLAN) aus der Oberfläche – im Haupt-Thread aufrufen; None bei Fehler"""
+        def fail(msg):
+            if quiet:
+                self.logmsg(f"TAKweb wird nicht aufgespielt: {msg}\n")
+            else:
+                messagebox.showwarning(APP_TITLE, msg, parent=self)
+            return None
+        if not self.tw_pkg:
+            return fail("Zuerst ein TAKweb-Paket laden (ZIP aus dem TAKweb-Admin oder „Vom TAKweb-Server…“).")
+        wifi = None
+        ssid, psk = self.v_tw_ssid.get().strip(), self.v_tw_psk.get()
+        if self.v_tw_wifi.get():
+            if not ssid:
+                return fail("Bitte den Hotspot-Namen eintragen (oder „WLAN am Gerät setzen“ abwählen).")
+            err = takweb.check_wifi(ssid, psk)
+            if err:
+                return fail(err)
+            wifi = (ssid, psk)
+        self.settings.update(takweb_ssid=ssid, takweb_psk=psk, takweb_wifi=self.v_tw_wifi.get(),
+                             takweb_after=self.v_tw_after.get())
+        self.save_settings(self.settings)
+        return self.tw_pkg, wifi
+
+    def takweb_install(self):
+        if self.busy:
+            return
+        port = self.port()
+        if not port:
+            messagebox.showwarning(APP_TITLE, "Bitte den USB-Port des Geräts wählen (Abschnitt 3).", parent=self)
+            return
+        params = self._takweb_params()
+        if not params:
+            return
+        pkg, wifi = params
+        txt = (f"TAKweb {pkg.version} ({human(pkg.total)}) auf das Gerät an {port} schreiben?\n\n"
+               "Die bisherige Web-Oberfläche des Geräts (/static) wird ersetzt, Einstellungen und Knoten bleiben."
+               + (f"\n\nWLAN danach: „{wifi[0]}“ – das Gerät startet neu, Bluetooth ist dann aus." if wifi else ""))
+        if not messagebox.askyesno(APP_TITLE, txt, parent=self):
+            return
+        self._prepare_port(port)
+        self._start(lambda: self._takweb_work(port, pkg, wifi), "TAKweb …")
+
+    def _takweb_work(self, port, pkg, wifi, first_wait=0):
+        labels = {"remove": "Alte Web-Dateien löschen", "upload": "Schreibe TAKweb", "check": "Prüfe",
+                  "wifi": "Setze WLAN", "done": "Fertig"}
+
+        def progress(step, done, total, name=""):
+            self.q.put(("state", labels.get(step, step)))
+            if step == "upload":
+                self.q.put(("prog", 100.0 * done / max(total, 1)))
+
+        try:
+            if first_wait:
+                time.sleep(first_wait)
+            last = None
+            # nach dem Flashen braucht das Gerät etwas, bis die API antwortet (Port kann kurz weg sein)
+            for attempt in range(4 if first_wait else 1):
+                try:
+                    takweb.install_serial(port, pkg, wifi, log=self.logmsg, progress=progress)
+                    last = None
+                    break
+                except Exception as e:
+                    last = e
+                    if attempt < (3 if first_wait else 0):
+                        self.logmsg(f"Gerät noch nicht bereit ({e}) – neuer Versuch …\n")
+                        time.sleep(6)
+            if last:
+                raise last
+            msg = f"TAKweb {pkg.version} ist auf dem Gerät."
+            if wifi:
+                msg += (f"\n\nDas Gerät startet neu und verbindet sich mit dem WLAN „{wifi[0]}“.\n"
+                        "Handy: Hotspot einschalten, dann im Browser https://<IP des Geräts> öffnen und das "
+                        "Zertifikat einmal akzeptieren.")
+            self.q.put(("done", (True, msg)))
+        except Exception as e:
+            hint = ""
+            if isinstance(e, ImportError):
+                hint = "\n\nPython-Paket fehlt: pip install meshtastic pyserial"
+            elif "busy" in str(e).lower() or "could not open" in str(e).lower() or "permission" in str(e).lower():
+                hint = "\n\nPort belegt? Andere Programme (Meshtastic-App, Browser, Serial-Monitor) schließen."
+            elif "keine Antwort" in str(e):
+                hint = "\n\nLäuft Meshtastic-Firmware auf dem Gerät? Richtiger Port? Kabel mit Daten?"
+            self.logmsg(f"\nFEHLER: {e}\n")
+            self.q.put(("done", (False, f"TAKweb nicht aufgespielt:\n{e}{hint}")))
 
     def erase_only(self):
         port = self.port()
