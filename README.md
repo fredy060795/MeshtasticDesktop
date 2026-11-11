@@ -36,6 +36,23 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
   - **Verbundenes Gerät erkennen** wählt das passende Board automatisch aus. **Eigene Datei flashen** erkennt Chip, Image-Art und Version und schlägt die richtige Adresse vor.
   - **Heltec V2.0**: Die bereitgestellte Firmware 2.7.13 (`firmware_custom/heltec-v2_0`) ist fest eingebaut. Für den Heltec V2 gibt es keine offizielle Firmware mehr.
   - **Offline-Firmware**: Der Workflow *Firmware-Offline-Pakete* (Actions → Run workflow, außerdem jeden Montag) lädt die neueste stabile Version und die neueste Alpha herunter. Er legt sie unter *Releases* als ZIP je Chip-Familie ab. Im Flasher lassen sie sich über **Online laden…** abrufen oder als ZIP mit **Paket importieren…** einlesen. Danach ist kein Internet mehr nötig.
+  - **🗺 TAKweb aufs Gerät** (Abschnitt *4. TAKweb aufs Gerät*, nur ESP32 – Heltec V2/V3, T-Beam, LilyGo, XIAO ESP32-S3 …): schreibt die Mesh-Ausgabe von [TAKweb](https://github.com/fredy060795/5036-TAKweb) in den Flash des Funkgeräts. Der Webserver der Meshtastic-Firmware liefert sie dann über WLAN aus. Ein Handy, das noch nie TAKweb geladen hat, bekommt so ohne Server und ohne Internet die Karte, Positionen, Chat, Marker und Sprachnachrichten über das Mesh.
+    - **Paket**: `takweb-mesh-<version>.zip` aus dem TAKweb-Admin (*Meshtastic → TAKweb on a Meshtastic radio*, oder direkt `https://<server>/api/eud/meshsite.zip`) mit **📦 Paket (ZIP)…** einlesen, oder **🌐 Vom TAKweb-Server…** laden. Das Paket bleibt in der Bibliothek (`…\MeshtasticDesktop\takweb\`), danach geht es offline.
+    - **Hotspot-Name / Passwort**: das WLAN, mit dem sich das Gerät verbindet – normalerweise der Handy-Hotspot. Vorgabe *TAKweb* / *12345678*. WPA2 braucht mindestens 8 Zeichen; leer = offenes WLAN. Am **iPhone** ist der Hotspot-Name der Gerätename (*Einstellungen → Allgemein → Info → Name*), also dort z. B. „TAKweb“ eintragen. Am **Android-Handy** lässt sich der Hotspot-Name frei wählen.
+    - **🗺 TAKweb aufspielen** über die normale USB-Verbindung (die Firmware muss schon laufen):
+      1. Die alte Web-Oberfläche unter `/static` wird gelöscht. Einstellungen, Knoten und Schlüssel bleiben erhalten.
+      2. Die TAKweb-Dateien (≈ 0,5 MB gzip) werden geschrieben und mit der Dateiliste des Geräts geprüft.
+      3. Das WLAN wird gesetzt und das Gerät startet neu.
+
+      Mit *nach dem Flashen automatisch aufspielen* passiert das direkt nach dem Flashen der Firmware.
+    - **Am Handy**:
+      1. Den Hotspot einschalten. Das Gerät verbindet sich.
+      2. `https://<IP des Geräts>` öffnen. Die IP steht auf dem Display oder in der Geräteliste des Hotspots.
+      3. Das Zertifikat einmal akzeptieren.
+
+      TAKweb verbindet sich dann selbst mit „This radio (WLAN)“.
+    - Solange WLAN an ist, ist Bluetooth am ESP32 aus (Firmware). Der Platz reicht ab 4 MB Flash (1 MB Dateisystem).
+    - Ohne Oberfläche: `python takweb.py COM5 takweb-mesh.zip TAKweb 12345678`
 - **Hop-Limit**: Es ist auf **1–7** begrenzt, weil höhere Werte den Node abstürzen lassen. Auch beim Wiederherstellen eines Backups wird der Wert begrenzt.
 - **📜 Log**: App-Log und optional das Debug-Log des Geräts.
 

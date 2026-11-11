@@ -58,6 +58,7 @@ pyinstaller %COMMON% --name MeshtasticDesktop app.py || goto :err
 pyinstaller %COMMON% --onefile --name MeshtasticDesktop-Portable app.py || goto :err
 pyinstaller --noconfirm --clean --windowed --onefile --icon icon.ico --add-data "icon.ico;." ^
   --add-data "firmware_custom;firmware_custom" --collect-all esptool --collect-submodules serial ^
+  --collect-all meshtastic --collect-all pubsub ^
   --name MeshtasticFlasher flasher.py || goto :err
 
 echo === 4/4  Installer bauen (Inno Setup 6) ===
