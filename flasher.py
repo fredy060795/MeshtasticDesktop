@@ -492,7 +492,8 @@ class FlasherFrame(ttk.Frame):
         self.btn_tw.grid(row=3, column=4, columnspan=2, sticky="e", pady=(4, 0))
         ttk.Label(tw, text="Am einfachsten: die TAKweb-Firmware (Version „…-takweb“, „Online laden…“) mit „Komplett neu "
                            "installieren“ flashen – TAKweb ist dann schon drauf und das Gerät öffnet IMMER ein eigenes "
-                           "WLAN „TAKweb“ (Passwort 12345678): Handy verbinden, https://takweb.local öffnen, Zertifikat "
+                           "WLAN „TAKweb-xxxx“ (eigener Name je Gerät, Passwort 12345678): Handy verbinden, "
+                           "https://takweb.local öffnen, Zertifikat "
                            "einmal akzeptieren. Der Hotspot-Name hier ist dann ein ZUSÄTZLICHES WLAN mit Internet "
                            "(z. B. Handy-Hotspot), mit dem sich das Gerät außerdem verbindet – geht auch in TAKweb unter "
                            "Meshtastic → „Internet over WLAN“. Bluetooth ist bei WLAN aus. "
