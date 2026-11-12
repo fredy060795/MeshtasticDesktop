@@ -13,6 +13,10 @@ on:
         description: "TAKweb-Stand (Branch/Tag von fredy060795/5036-TAKweb)"
         required: false
         default: "main"
+      region:
+        description: "LoRa-Region ab Werk (EU_868, EU_433, US, UK_868, …) – leer = nicht gesetzt"
+        required: false
+        default: "EU_868"
   push:
     paths:
       - "tools/takweb_firmware/**"
@@ -67,7 +71,10 @@ jobs:
           mkdir -p ../takweb-static
           node -e "
             const fs = require('fs');
-            const b = require('./lib/meshsite').build(require('./package.json').version);
+            // 8 MB boards (ESP32-S3): detailed world map, 4 MB boards (1 MB file system): the small one
+            const map = /s3/.test('${{ matrix.env }}') ? 'full' : 'small';
+            const b = require('./lib/meshsite').build(require('./package.json').version, '', map);
+            console.log('Weltkarte:', map);
             for (const f of b.files) fs.writeFileSync('../takweb-static/' + f.name + '.gz', f.gz);
             console.log('TAKweb', b.version, b.files.length, 'Dateien', b.total, 'Bytes');
             fs.writeFileSync('../takweb-version.txt', b.version);"
@@ -75,7 +82,7 @@ jobs:
         run: |
           git clone --depth 1 --branch "${{ needs.prep.outputs.fw }}" --recurse-submodules --shallow-submodules \
             https://github.com/meshtastic/firmware fw
-          python tools/takweb_firmware/patch_firmware.py fw takweb-static
+          TAKWEB_REGION="${{ github.event.inputs.region || 'EU_868' }}" python tools/takweb_firmware/patch_firmware.py fw takweb-static
       - uses: actions/cache@v4
         with:
           path: ~/.platformio
