@@ -26,6 +26,7 @@ HELPERS = r'''
 // (eigener DNS-Responder: die Arduino-Bibliothek DNSServer ist in der Firmware abgeschaltet)
 #ifdef ARCH_ESP32
 #include <WiFiUdp.h>
+#include <esp_netif.h>
 static WiFiUDP takwebDns;
 static int32_t takwebDnsLoop()
 {
@@ -90,6 +91,18 @@ AP_START = r'''
             WiFi.mode(WIFI_AP);
             WiFi.softAPConfig(IPAddress(%(ip)s), IPAddress(%(ip)s), IPAddress(255, 255, 255, 0));
             WiFi.softAP(wifiName, (wifiPsw && strlen(wifiPsw) >= 8) ? wifiPsw : NULL);
+            {
+                // per DHCP KEINEN Router angeben: das Handy sieht ein reines Nahbereichs-WLAN und nimmt fürs
+                // Internet (Karten, TAK-Server) weiter seine mobilen Daten – TAKweb kommt trotzdem von hier
+                esp_netif_t *apif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+                if (apif) {
+                    uint8_t offerRouter = 0;
+                    esp_netif_dhcps_stop(apif);
+                    esp_netif_dhcps_option(apif, ESP_NETIF_OP_SET, ESP_NETIF_ROUTER_SOLICITATION_ADDRESS, &offerRouter,
+                                           sizeof(offerRouter));
+                    esp_netif_dhcps_start(apif);
+                }
+            }
             WiFi.setSleep(false);
             esp_wifi_set_ps(WIFI_PS_NONE);
             LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", wifiName);
@@ -132,13 +145,16 @@ def patch_wifi(fw):
     print("WiFiAPClient.cpp: Access Point + DNS eingebaut")
 
 
-def patch_prefs(fw, ssid="TAKweb", psk="12345678"):
+def patch_prefs(fw, ssid="TAKweb", psk="12345678", region="EU_868"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
     # Achtung: userPrefs macht aus reinen Ziffern ("12345678") eine Zahl statt Text – das Passwort setzen wir
     # deshalb direkt in NodeDB.cpp (der Eintrag hier sorgt nur dafür, dass die Stelle übersetzt wird)
     prefs.update({"USERPREFS_NETWORK_WIFI_ENABLED": "true", "USERPREFS_NETWORK_WIFI_SSID": ssid,
                   "USERPREFS_NETWORK_WIFI_PSK": "takweb-psk"})
+    # LoRa-Region vorbelegt: ohne Region sendet Meshtastic gar nicht – und mit WLAN an (Bluetooth aus) fragt keine App
+    if region and re.fullmatch(r"[A-Z0-9_]+", region):
+        prefs["USERPREFS_CONFIG_LORA_REGION"] = f"meshtastic_Config_LoRaConfig_RegionCode_{region}"
     json.dump(prefs, open(p, "w", encoding="utf-8"), indent=2)
     n = os.path.join(fw, "src", "mesh", "NodeDB.cpp")
     s = open(n, encoding="utf-8").read()
@@ -146,7 +162,7 @@ def patch_prefs(fw, ssid="TAKweb", psk="12345678"):
     s = sub_once(s, "strncpy(config.network.wifi_psk, USERPREFS_NETWORK_WIFI_PSK,",
                  f"strncpy(config.network.wifi_psk, {lit},", "WLAN-Passwort (NodeDB.cpp)")
     open(n, "w", encoding="utf-8").write(s)
-    print(f"userPrefs.jsonc: WLAN an, „{ssid}“ / „{psk}“")
+    print(f"userPrefs.jsonc: WLAN an, „{ssid}“ / „{psk}“, LoRa-Region {region or '(nicht gesetzt)'}")
 
 
 def add_takweb(fw, src):
@@ -169,6 +185,6 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     fw = sys.argv[1]
     patch_wifi(fw)
-    patch_prefs(fw)
+    patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])
