@@ -39,7 +39,7 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
   - **📶 TAKweb-Firmware – das Gerät macht sein eigenes WLAN** (am einfachsten, ESP32: Heltec V2/V3, T-Beam, T-Beam S3, LilyGo T-LoRa/T3S3, XIAO ESP32-S3):
     1. Im Flasher **🌐 Online laden…** → Release *TAKweb-Firmware …* (Version endet auf `-takweb`).
     2. Gerät wählen (Name endet auf „– TAKweb-WLAN“) → **Komplett neu installieren** → **⚡ Firmware flashen**. TAKweb ist schon in der Firmware drin.
-    3. Am Handy mit dem WLAN **TAKweb** verbinden (Passwort **12345678**). Kommt „kein Internet“: trotzdem verbunden bleiben.
+    3. Am Handy mit dem WLAN **TAKweb-xxxx** verbinden – jedes Gerät hat seinen eigenen Namen (letzte 4 Stellen der Gerätekennung), Passwort **12345678**. Im TAKweb-Admin lassen sich Name und Passwort beim Einrichten frei festlegen. Kommt „kein Internet“: trotzdem verbunden bleiben.
     4. Im Browser **https://192.168.4.1** öffnen (oder `https://takweb.local`) und das Zertifikat des Geräts einmal akzeptieren („Erweitert“ → „Weiter“). Als Lesezeichen oder auf dem Home-Bildschirm ablegen.
 
     Internet fürs Gerät (optional): in TAKweb unter Meshtastic → „Internet over WLAN“ ein WLAN mit Internet wählen (z. B. den Handy-Hotspot) – das Gerät verbindet sich zusätzlich damit, das eigene WLAN „TAKweb“ bleibt immer an. Bluetooth ist aus, solange das WLAN läuft (zu wenig Speicher für beides mit https).

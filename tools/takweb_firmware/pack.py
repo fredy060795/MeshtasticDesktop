@@ -21,8 +21,9 @@ NOTES = """**TAKweb-Firmware** für Meshtastic-Geräte mit ESP32 – das Gerät 
 **Einfach so:**
 1. Im Flasher (Meshtastic Desktop): *Online laden…* → dieses Release, oder ZIP herunterladen und *Paket importieren…*
 2. Gerät wählen (Version „{version}“) → **Komplett neu installieren** → *Firmware flashen*.
-3. Am Handy mit dem WLAN **TAKweb** verbinden (Passwort **12345678**). Meldung „kein Internet“ → trotzdem
-   verbunden bleiben.
+3. Am Handy mit dem WLAN **TAKweb-xxxx** verbinden (jedes Gerät hat seinen eigenen Namen, die letzten 4 Stellen kommen
+   aus der Gerätekennung; Passwort **12345678** – im TAKweb-Admin beim Einrichten frei wählbar). Meldung „kein Internet“
+   → trotzdem verbunden bleiben.
 4. Im Browser **https://takweb.local** öffnen (oder https://192.168.4.1) und das Zertifikat des Geräts einmal
    akzeptieren („Erweitert“ → „Weiter“). Am besten als Lesezeichen / Home-Bildschirm ablegen.
 5. Mesh-Kanal: in TAKweb unter Meshtastic → „Channel from a link“ den Kanal-Link eures Mesh einfügen (eine

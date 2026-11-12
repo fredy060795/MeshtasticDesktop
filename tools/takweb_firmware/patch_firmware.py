@@ -2,8 +2,10 @@
 """
 Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Geräte:
 
-* Das Gerät öffnet IMMER ein eigenes WLAN (Access Point): Name „TAKweb“, Passwort „12345678“
-  (beim Bauen: TAKWEB_AP_SSID / TAKWEB_AP_PSK) – auch ganz ohne Internet die letzte Rückfallebene.
+* Das Gerät öffnet IMMER ein eigenes WLAN (Access Point) – auch ganz ohne Internet die letzte Rückfallebene.
+  Name „TAKweb-<letzte 4 Stellen der MAC>“ (jedes Gerät ein eigener Name), Passwort „12345678“ (beim Bauen:
+  TAKWEB_AP_SSID / TAKWEB_AP_PSK). Der TAKweb-Admin kann beim Einrichten Name und Passwort festlegen
+  (/prefs/takweb-ap.txt: Zeile 1 Name, Zeile 2 Passwort).
 * Zusätzlich (gleichzeitig) verbindet es sich mit einem WLAN mit Internet, z. B. dem Handy-Hotspot: das ist die normale
   Meshtastic-WLAN-Einstellung (Netzwerk → WLAN-Name/Passwort, in TAKweb: Meshtastic → „Internet over WLAN“).
   Leer = nur das eigene WLAN. Mit Internet hat das Gerät Uhrzeit (NTP) und kann z. B. per MQTT ans Netz.
@@ -31,8 +33,36 @@ HELPERS = r'''
 #ifdef ARCH_ESP32
 #include <WiFiUdp.h>
 #include <esp_netif.h>
+#include "FSCommon.h"
+#include "SPILock.h"
 #define TAKWEB_AP_SSID %(ssid)s
 #define TAKWEB_AP_PSK %(psk)s
+// name and password of the radio's own WLAN: /prefs/takweb-ap.txt (line 1 name, line 2 password – written by the
+// TAKweb admin when it sets up the radio); without it "TAKweb-<last 4 of the MAC>" – ten radios never share a name
+static char takwebApSsid[33];
+static char takwebApPsk[64];
+static void takwebApLoad()
+{
+    uint8_t dmac[6];
+    getMacAddr(dmac);
+    snprintf(takwebApSsid, sizeof(takwebApSsid), "%%s-%%02X%%02X", TAKWEB_AP_SSID, dmac[4], dmac[5]);
+    strncpy(takwebApPsk, TAKWEB_AP_PSK, sizeof(takwebApPsk) - 1);
+    concurrency::LockGuard g(spiLock);
+    File f = FSCom.open("/prefs/takweb-ap.txt", FILE_O_READ);
+    if (!f)
+        return;
+    String name = f.readStringUntil('\n');
+    String psk = f.readStringUntil('\n');
+    f.close();
+    name.trim();
+    psk.trim();
+    if (name.length() > 0 && name.length() <= 32)
+        strncpy(takwebApSsid, name.c_str(), sizeof(takwebApSsid) - 1);
+    if (psk.length() == 0 || (psk.length() >= 8 && psk.length() <= 63)) {
+        memset(takwebApPsk, 0, sizeof(takwebApPsk));
+        strncpy(takwebApPsk, psk.c_str(), sizeof(takwebApPsk) - 1);
+    }
+}
 static WiFiUDP takwebDns;
 static int32_t takwebNoUpstream()
 {
@@ -99,14 +129,15 @@ AP_START = r'''
 #ifdef ARCH_ESP32
         {
             // TAKweb: IMMER ein eigenes WLAN – und gleichzeitig, falls eingestellt, das WLAN mit Internet (Handy-Hotspot)
+            takwebApLoad();
             const char *upName = config.network.wifi_ssid;
-            bool upstream = upName[0] && strcmp(upName, TAKWEB_AP_SSID) != 0;
+            bool upstream = upName[0] && strcmp(upName, TAKWEB_AP_SSID) != 0 && strcmp(upName, takwebApSsid) != 0;
             // den Wiederverbinder VOR allem anderen anlegen: WLAN-Ereignisse greifen auf ihn zu
             wifiReconnect = new Periodic("WifiConnect", upstream ? reconnectWiFi : takwebNoUpstream);
             WiFi.persistent(false);
             WiFi.mode(upstream ? WIFI_AP_STA : WIFI_AP);
             WiFi.softAPConfig(IPAddress(%(ip)s), IPAddress(%(ip)s), IPAddress(255, 255, 255, 0));
-            WiFi.softAP(TAKWEB_AP_SSID, strlen(TAKWEB_AP_PSK) >= 8 ? TAKWEB_AP_PSK : NULL);
+            WiFi.softAP(takwebApSsid, strlen(takwebApPsk) >= 8 ? takwebApPsk : NULL);
             {
                 // per DHCP KEINEN Router angeben: das Handy sieht ein reines Nahbereichs-WLAN und nimmt fürs
                 // Internet (Karten, TAK-Server) weiter seine mobilen Daten – TAKweb kommt trotzdem von hier
@@ -123,7 +154,7 @@ AP_START = r'''
             esp_wifi_set_ps(WIFI_PS_NONE);
             if (upstream)
                 WiFi.onEvent(WiFiEvent); // nur mit Internet-WLAN: Verbinden/Trennen/IP wie in Meshtastic
-            LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", TAKWEB_AP_SSID);
+            LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", takwebApSsid);
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
             createSSLCert();
 #endif
@@ -177,7 +208,7 @@ def patch_wifi(fw):
     s = s.replace('MDNS.begin("Meshtastic")', 'MDNS.begin("takweb")')
     s = s.replace('LOG_INFO("mDNS Host: Meshtastic.local");', 'LOG_INFO("mDNS Host: takweb.local");')
     open(p, "w", encoding="utf-8").write(s)
-    print(f"WiFiAPClient.cpp: eigenes WLAN „{ssid}“ + Internet-WLAN + DNS eingebaut")
+    print(f"WiFiAPClient.cpp: eigenes WLAN „{ssid}-xxxx“ + Internet-WLAN + DNS eingebaut")
 
 
 def patch_prefs(fw, region="EU_868"):
