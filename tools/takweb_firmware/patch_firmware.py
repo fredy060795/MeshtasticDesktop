@@ -103,8 +103,10 @@ AP_START = r'''
             // TAKweb: IMMER ein eigenes WLAN – und gleichzeitig, falls eingestellt, das WLAN mit Internet (Handy-Hotspot)
             const char *upName = config.network.wifi_ssid;
             bool upstream = upName[0] && strcmp(upName, TAKWEB_AP_SSID) != 0;
+            // den Wiederverbinder VOR allem anderen anlegen: WLAN-Ereignisse greifen auf ihn zu
+            wifiReconnect = new Periodic("WifiConnect", upstream ? reconnectWiFi : takwebNoUpstream);
             WiFi.persistent(false);
-            WiFi.mode(WIFI_AP_STA);
+            WiFi.mode(upstream ? WIFI_AP_STA : WIFI_AP);
             WiFi.softAPConfig(IPAddress(%(ip)s), IPAddress(%(ip)s), IPAddress(255, 255, 255, 0));
             WiFi.softAP(TAKWEB_AP_SSID, strlen(TAKWEB_AP_PSK) >= 8 ? TAKWEB_AP_PSK : NULL);
             {
@@ -121,8 +123,8 @@ AP_START = r'''
             }
             WiFi.setSleep(false);
             esp_wifi_set_ps(WIFI_PS_NONE);
-            WiFi.setHostname("takweb");
-            WiFi.onEvent(WiFiEvent);
+            if (upstream)
+                WiFi.onEvent(WiFiEvent); // nur mit Internet-WLAN: Verbinden/Trennen/IP wie in Meshtastic
             LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", TAKWEB_AP_SSID);
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
             createSSLCert();
@@ -137,9 +139,6 @@ AP_START = r'''
                                 config.network.ipv4_config.subnet, config.network.ipv4_config.dns);
                 WiFi.setAutoReconnect(true);
                 LOG_INFO("TAKweb: verbinde zusaetzlich mit dem Internet-WLAN '%%s'", upName);
-                wifiReconnect = new Periodic("WifiConnect", reconnectWiFi); // verbinden, wiederverbinden, NTP
-            } else {
-                wifiReconnect = new Periodic("WifiConnect", takwebNoUpstream);
             }
             onNetworkConnected();
             return true;
@@ -170,7 +169,9 @@ def patch_wifi(fw):
     j = s.index(cond, i)
     if j - i > 200:
         sys.exit("Patch: Anfang von initWifi passt nicht.")
-    s = s[:j] + "if (config.network.wifi_enabled) {\n" + AP_START + s[j + len(cond):]
+    # das eigene WLAN ist IMMER an – auch wenn alte, behaltene Einstellungen (Update) WLAN aus haben
+    s = s[:j] + ("config.network.wifi_enabled = true; // TAKweb: eigenes WLAN immer (nur im Speicher)\n"
+                 "    if (config.network.wifi_enabled) {\n") + AP_START + s[j + len(cond):]
     s = sub_once(s, "if (config.network.wifi_enabled && (config.network.wifi_ssid[0])) {",
                  "if (config.network.wifi_enabled) {", "isWifiAvailable")
     if 'MDNS.begin("Meshtastic")' not in s:
