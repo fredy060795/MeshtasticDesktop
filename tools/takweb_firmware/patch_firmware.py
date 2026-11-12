@@ -127,9 +127,17 @@ def patch_wifi(fw):
 def patch_prefs(fw, ssid="TAKweb", psk="12345678"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
+    # Achtung: userPrefs macht aus reinen Ziffern ("12345678") eine Zahl statt Text – das Passwort setzen wir
+    # deshalb direkt in NodeDB.cpp (der Eintrag hier sorgt nur dafür, dass die Stelle übersetzt wird)
     prefs.update({"USERPREFS_NETWORK_WIFI_ENABLED": "true", "USERPREFS_NETWORK_WIFI_SSID": ssid,
-                  "USERPREFS_NETWORK_WIFI_PSK": psk})
+                  "USERPREFS_NETWORK_WIFI_PSK": "takweb-psk"})
     json.dump(prefs, open(p, "w", encoding="utf-8"), indent=2)
+    n = os.path.join(fw, "src", "mesh", "NodeDB.cpp")
+    s = open(n, encoding="utf-8").read()
+    lit = '"' + psk.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    s = sub_once(s, "strncpy(config.network.wifi_psk, USERPREFS_NETWORK_WIFI_PSK,",
+                 f"strncpy(config.network.wifi_psk, {lit},", "WLAN-Passwort (NodeDB.cpp)")
+    open(n, "w", encoding="utf-8").write(s)
     print(f"userPrefs.jsonc: WLAN an, „{ssid}“ / „{psk}“")
 
 
