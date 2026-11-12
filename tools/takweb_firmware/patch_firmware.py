@@ -169,7 +169,9 @@ def patch_wifi(fw):
     j = s.index(cond, i)
     if j - i > 200:
         sys.exit("Patch: Anfang von initWifi passt nicht.")
-    s = s[:j] + "if (config.network.wifi_enabled) {\n" + AP_START + s[j + len(cond):]
+    # das eigene WLAN ist IMMER an – auch wenn alte, behaltene Einstellungen (Update) WLAN aus haben
+    s = s[:j] + ("config.network.wifi_enabled = true; // TAKweb: eigenes WLAN immer (nur im Speicher)\n"
+                 "    if (config.network.wifi_enabled) {\n") + AP_START + s[j + len(cond):]
     s = sub_once(s, "if (config.network.wifi_enabled && (config.network.wifi_ssid[0])) {",
                  "if (config.network.wifi_enabled) {", "isWifiAvailable")
     if 'MDNS.begin("Meshtastic")' not in s:
