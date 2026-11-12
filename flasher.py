@@ -370,6 +370,9 @@ class _QueueWriter(io.TextIOBase):
 # GUI
 # ======================================================================================
 class FlasherFrame(ttk.Frame):
+    TW_IPHONE = f"{takweb.IPHONE_IP}  (fest – iPhone-Hotspot)"
+    TW_DHCP = "automatisch (vom Hotspot, DHCP)"
+
     def __init__(self, parent, data_dir=None, settings=None, save_settings=None,
                  get_iface=None, disconnect_app=None):
         super().__init__(parent, padding=6)
@@ -470,17 +473,25 @@ class FlasherFrame(ttk.Frame):
         self.v_tw_wifi = tk.BooleanVar(value=self.settings.get("takweb_wifi", True))
         ttk.Checkbutton(tw, text="WLAN am Gerät setzen", variable=self.v_tw_wifi).grid(
             row=1, column=4, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Label(tw, text="Adresse:").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.v_tw_ip = tk.StringVar(value=self.settings.get("takweb_ip", self.TW_IPHONE))
+        ttk.Combobox(tw, textvariable=self.v_tw_ip, width=44, values=[self.TW_IPHONE, self.TW_DHCP]).grid(
+            row=2, column=1, columnspan=3, sticky="w", padx=4, pady=(4, 0))
+        ttk.Label(tw, text="(oder eigene feste IP eintragen)", foreground="gray").grid(
+            row=2, column=4, columnspan=2, sticky="w", pady=(4, 0))
         self.v_tw_after = tk.BooleanVar(value=self.settings.get("takweb_after", False))
         ttk.Checkbutton(tw, text="nach dem Flashen (ESP32) automatisch aufspielen", variable=self.v_tw_after).grid(
-            row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
         self.btn_tw = ttk.Button(tw, text="🗺 TAKweb aufspielen", command=self.takweb_install)
-        self.btn_tw.grid(row=2, column=4, columnspan=2, sticky="e", pady=(4, 0))
+        self.btn_tw.grid(row=3, column=4, columnspan=2, sticky="e", pady=(4, 0))
         ttk.Label(tw, text="Danach: Handy-Hotspot mit diesem Namen und Passwort einschalten (iPhone: Hotspot-Name = "
                            "Gerätename unter Einstellungen → Allgemein → Info → Name; Passwort mind. 8 Zeichen, leer = "
-                           "offenes WLAN). Das Gerät verbindet sich, im Browser https://<IP des Geräts> öffnen (IP auf "
-                           "dem Display oder in der Hotspot-Geräteliste), Zertifikat einmal akzeptieren. "
+                           "offenes WLAN). Das Gerät verbindet sich. Im iPhone-Hotspot ist es mit fester Adresse immer "
+                           f"unter https://{takweb.IPHONE_IP} erreichbar (Lesezeichen anlegen!). Android-Hotspots wechseln "
+                           "ihren Adressbereich – dort „automatisch“ wählen und die IP vom Display des Geräts oder "
+                           "https://meshtastic.local nehmen. Zertifikat einmal akzeptieren. "
                            "Solange WLAN an ist, ist Bluetooth am Gerät aus.",
-                  foreground="gray", wraplength=1000, justify="left").grid(row=3, column=0, columnspan=6, sticky="w",
+                  foreground="gray", wraplength=1000, justify="left").grid(row=4, column=0, columnspan=6, sticky="w",
                                                                            pady=(4, 0))
         self.tw_pkg = None
 
@@ -932,14 +943,16 @@ class FlasherFrame(ttk.Frame):
             return fail("Zuerst ein TAKweb-Paket laden (ZIP aus dem TAKweb-Admin oder „Vom TAKweb-Server…“).")
         wifi = None
         ssid, psk = self.v_tw_ssid.get().strip(), self.v_tw_psk.get()
+        ip_txt = self.v_tw_ip.get().strip()
+        static_ip = None if ip_txt in ("", self.TW_DHCP) or ip_txt.startswith("auto") else ip_txt.split()[0]
         if self.v_tw_wifi.get():
             if not ssid:
                 return fail("Bitte den Hotspot-Namen eintragen (oder „WLAN am Gerät setzen“ abwählen).")
-            err = takweb.check_wifi(ssid, psk)
+            err = takweb.check_wifi(ssid, psk, static_ip)
             if err:
                 return fail(err)
-            wifi = (ssid, psk)
-        self.settings.update(takweb_ssid=ssid, takweb_psk=psk, takweb_wifi=self.v_tw_wifi.get(),
+            wifi = (ssid, psk, static_ip)
+        self.settings.update(takweb_ssid=ssid, takweb_psk=psk, takweb_wifi=self.v_tw_wifi.get(), takweb_ip=ip_txt,
                              takweb_after=self.v_tw_after.get())
         self.save_settings(self.settings)
         return self.tw_pkg, wifi
@@ -957,7 +970,8 @@ class FlasherFrame(ttk.Frame):
         pkg, wifi = params
         txt = (f"TAKweb {pkg.version} ({human(pkg.total)}) auf das Gerät an {port} schreiben?\n\n"
                "Die bisherige Web-Oberfläche des Geräts (/static) wird ersetzt, Einstellungen und Knoten bleiben."
-               + (f"\n\nWLAN danach: „{wifi[0]}“ – das Gerät startet neu, Bluetooth ist dann aus." if wifi else ""))
+               + (f"\n\nWLAN danach: „{wifi[0]}“, Adresse " + (wifi[2] or "automatisch (DHCP)")
+                  + " – das Gerät startet neu, Bluetooth ist dann aus." if wifi else ""))
         if not messagebox.askyesno(APP_TITLE, txt, parent=self):
             return
         self._prepare_port(port)
@@ -991,8 +1005,10 @@ class FlasherFrame(ttk.Frame):
                 raise last
             msg = f"TAKweb {pkg.version} ist auf dem Gerät."
             if wifi:
+                where = (f"https://{wifi[2]}" if wifi[2] else
+                         "https://<IP des Geräts> (Display) oder https://meshtastic.local")
                 msg += (f"\n\nDas Gerät startet neu und verbindet sich mit dem WLAN „{wifi[0]}“.\n"
-                        "Handy: Hotspot einschalten, dann im Browser https://<IP des Geräts> öffnen und das "
+                        f"Handy: Hotspot einschalten, dann im Browser {where} öffnen (Lesezeichen anlegen) und das "
                         "Zertifikat einmal akzeptieren.")
             self.q.put(("done", (True, msg)))
         except Exception as e:
