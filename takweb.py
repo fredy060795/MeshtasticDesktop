@@ -14,11 +14,13 @@ Admin-Bereich macht (public/eud/meshinstall.js):
   5. WLAN setzen (z. B. Handy-Hotspot) und Neustart
 
 Danach: Handy-Hotspot einschalten, das Gerät verbindet sich, im Browser https://<Adresse des Geräts> öffnen.
+Mit fester Adresse im iPhone-Hotspot immer https://172.20.10.14 (IPHONE_IP).
 
 Das Paket („takweb-mesh-<version>.zip“) gibt es im TAKweb-Admin (Meshtastic → „TAKweb on a Meshtastic radio“)
 oder direkt vom TAKweb-Server: https://<server>/api/eud/meshsite.zip
 """
 import io
+import ipaddress
 import json
 import os
 import queue
@@ -32,6 +34,27 @@ CHUNK = 128               # XModem-Puffer der Firmware
 MAGIC = b"\x94\xc3"       # Rahmen der seriellen Client-API: 0x94 0xC3 <Länge 2 Byte> <Protobuf>
 MAX_FRAME = 512
 PACKAGE_INFO = "takweb-mesh.json"
+
+# Feste Adresse im iPhone-Hotspot: das iPhone vergibt immer 172.20.10.0/28 (Router 172.20.10.1, Geräte ab .2).
+# .14 ist die letzte Adresse – die bekommt per DHCP erst das 13. Gerät, also praktisch nie ein anderes.
+IPHONE_IP = "172.20.10.14"
+
+
+def static_net(ip):
+    """feste IP -> (ip, gateway, subnet, dns) als Text; iPhone-Hotspot /28, sonst /24 mit Router .1"""
+    a = ipaddress.IPv4Address(ip.strip())
+    if a in ipaddress.IPv4Network("172.20.10.0/28"):
+        return str(a), "172.20.10.1", "255.255.255.240", "172.20.10.1"
+    gw = str(ipaddress.IPv4Network(f"{a}/24", strict=False).network_address + 1)
+    if gw == str(a):
+        raise ValueError("die Adresse ist die des Routers")
+    return str(a), gw, "255.255.255.0", gw
+
+
+def ip_u32(ip):
+    """so wie die Firmware die Adresse speichert (ESP32 IPAddress: erstes Byte unten)"""
+    return int.from_bytes(ipaddress.IPv4Address(ip).packed, "little")
+
 
 # Partition für Dateien (LittleFS) je nach Flash-Größe – TAKweb braucht gut 0,5 MB
 FS_HINT = "4 MB Flash: 1 MB, 8 MB: 1,5 MB, 16 MB: 3,4 MB"
@@ -335,7 +358,7 @@ class RadioInstaller:
         p.decoded.want_response = True
         self.send(mesh_pb2.ToRadio(packet=p).SerializeToString())
 
-    def set_wifi(self, ssid, psk):
+    def set_wifi(self, ssid, psk, static_ip=None):
         from meshtastic.protobuf import admin_pb2, config_pb2
         net = config_pb2.Config.NetworkConfig()
         if self.network is not None:
@@ -343,6 +366,14 @@ class RadioInstaller:
         net.wifi_enabled = True
         net.wifi_ssid = ssid
         net.wifi_psk = psk or ""
+        C = config_pb2.Config.NetworkConfig
+        if static_ip:                           # feste Adresse – das Handy findet das Gerät immer unter derselben IP
+            ip, gw, mask, dns = static_net(static_ip)
+            net.address_mode = C.STATIC
+            net.ipv4_config.ip, net.ipv4_config.gateway = ip_u32(ip), ip_u32(gw)
+            net.ipv4_config.subnet, net.ipv4_config.dns = ip_u32(mask), ip_u32(dns)
+        else:
+            net.address_mode = C.DHCP
         a = admin_pb2.AdminMessage()
         a.set_config.network.CopyFrom(net)
         self._admin(a)
@@ -353,7 +384,7 @@ class RadioInstaller:
 
     # -------------------------------------------------------------- alles
     def install(self, package, wifi=None, progress=lambda step, done, total, name="": None):
-        """package: Package; wifi: (ssid, psk) oder None (WLAN bleibt wie es ist)"""
+        """package: Package; wifi: (ssid, psk[, feste IP]) oder None (WLAN bleibt wie es ist)"""
         st = self.read_state()
         self.log(f"Gerät !{st['node']:08x}: {len(st['files'])} Dateien im Flash\n")
         old = [n for n, _ in st["files"] if n.lstrip("/").startswith("static/")]
@@ -377,18 +408,25 @@ class RadioInstaller:
                               f"\nDateisystem je nach Flash-Größe: {FS_HINT}.")
         if wifi and wifi[0]:
             progress("wifi", 0, 1)
-            self.set_wifi(wifi[0], wifi[1])
+            static_ip = wifi[2] if len(wifi) > 2 else None
+            self.set_wifi(wifi[0], wifi[1], static_ip)
             time.sleep(1.5)
             try:
                 self.reboot(3)
             except Exception:
                 pass
-            self.log(f"WLAN gesetzt: „{wifi[0]}“ – das Gerät startet neu (Bluetooth ist aus, solange WLAN an ist)\n")
+            self.log(f"WLAN gesetzt: „{wifi[0]}“" + (f", feste Adresse {static_ip}" if static_ip else ", Adresse vom Hotspot (DHCP)")
+                     + " – das Gerät startet neu (Bluetooth ist aus, solange WLAN an ist)\n")
         progress("done", 1, 1)
 
 
-def check_wifi(ssid, psk):
+def check_wifi(ssid, psk, static_ip=None):
     """-> Fehlertext oder ''"""
+    if static_ip:
+        try:
+            static_net(static_ip)
+        except ValueError as e:
+            return f"Feste Adresse ungültig: {static_ip} ({e})"
     if len(ssid.encode("utf-8")) > 32:
         return "Der WLAN-Name darf höchstens 32 Zeichen haben."
     if psk and not 8 <= len(psk) <= 63:
@@ -409,14 +447,15 @@ def install_serial(port, package, wifi=None, log=print, progress=lambda *a: None
             link.close()
 
 
-if __name__ == "__main__":       # python takweb.py COM5 takweb-mesh.zip [WLAN-Name] [Passwort]
+if __name__ == "__main__":       # python takweb.py COM5 takweb-mesh.zip [WLAN-Name] [Passwort] [feste IP]
     import sys
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
     pkg = Package.from_file(sys.argv[2]) if os.path.exists(sys.argv[2]) else Package.from_server(sys.argv[2])
     print(f"TAKweb {pkg.version}: {len(pkg.files)} Dateien, {pkg.total // 1024} KB")
-    w = (sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "") if len(sys.argv) > 3 else None
+    w = (sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "",
+         sys.argv[5] if len(sys.argv) > 5 else None) if len(sys.argv) > 3 else None
     install_serial(sys.argv[1], pkg, w, log=lambda s: print(s, end=""),
                    progress=lambda step, d, t, n="": print(f"\r{step} {n} {100 * d // max(t, 1)}%   ", end=""))
     print("\nFertig.")

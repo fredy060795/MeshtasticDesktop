@@ -1,0 +1,132 @@
+# Baut die TAKweb-Firmware: Meshtastic für ESP32-Geräte, bei der das Gerät ein eigenes WLAN "TAKweb"
+# (Passwort 12345678) öffnet und TAKweb selbst ausliefert – http://takweb/ oder http://192.168.4.1.
+# Ergebnis: Release "takweb-fw-<version>" (im Flasher: "Online laden…") bzw. Artifact.
+name: TAKweb-Firmware
+on:
+  workflow_dispatch:
+    inputs:
+      firmware:
+        description: "Meshtastic-Version (Tag, z. B. v2.7.15.567b8ea) – leer = neueste stabile"
+        required: false
+        default: ""
+      takweb:
+        description: "TAKweb-Stand (Branch/Tag von fredy060795/5036-TAKweb)"
+        required: false
+        default: "main"
+  push:
+    paths:
+      - "tools/takweb_firmware/**"
+      - ".github/workflows/takweb-firmware.yml"
+permissions:
+  contents: write
+concurrency:
+  group: takweb-firmware-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # TAKweb-Stand: beim Testen auf einem Branch der Branch mit der Mesh-Ausgabe
+  TAKWEB_REF: ${{ github.event.inputs.takweb || (github.ref == 'refs/heads/main' && 'main' || 'claude/great-maxwell-3bklnb') }}
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      fw: ${{ steps.v.outputs.fw }}
+    steps:
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          fw="${{ github.event.inputs.firmware }}"
+          if [ -z "$fw" ]; then
+            fw=$(gh release list -R meshtastic/firmware --exclude-pre-releases --exclude-drafts -L 1 --json tagName -q '.[0].tagName')
+          fi
+          echo "Meshtastic: $fw"
+          echo "fw=$fw" >> "$GITHUB_OUTPUT"
+  build:
+    needs: prep
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [heltec-v2_0, heltec-v2_1, tbeam, tlora-v2-1-1_6, heltec-v3, seeed-xiao-s3, tlora-t3s3-v1, tbeam-s3-core]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: fredy060795/5036-TAKweb
+          ref: ${{ env.TAKWEB_REF }}
+          path: takweb
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: TAKweb (Mesh-Ausgabe) erzeugen
+        run: |
+          cd takweb && npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          mkdir -p ../takweb-static
+          node -e "
+            const fs = require('fs');
+            const b = require('./lib/meshsite').build(require('./package.json').version);
+            for (const f of b.files) fs.writeFileSync('../takweb-static/' + f.name + '.gz', f.gz);
+            console.log('TAKweb', b.version, b.files.length, 'Dateien', b.total, 'Bytes');
+            fs.writeFileSync('../takweb-version.txt', b.version);"
+      - name: Meshtastic-Quellcode holen und patchen
+        run: |
+          git clone --depth 1 --branch "${{ needs.prep.outputs.fw }}" --recurse-submodules --shallow-submodules \
+            https://github.com/meshtastic/firmware fw
+          python tools/takweb_firmware/patch_firmware.py fw takweb-static
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ matrix.env }}-${{ needs.prep.outputs.fw }}
+          restore-keys: pio-${{ matrix.env }}-
+      - name: Bauen
+        run: |
+          pip install -U platformio
+          cd fw && pio run -e "${{ matrix.env }}" -t mtjson
+      - name: Dateien einsammeln
+        run: |
+          mkdir -p out
+          b=fw/.pio/build/${{ matrix.env }}
+          ls -la $b
+          cp $b/*.mt.json $b/firmware-*.factory.bin $b/littlefs-*.bin out/
+          for f in $b/firmware-*.bin; do case "$f" in *.factory.bin) ;; *) cp "$f" out/ ;; esac; done
+          cp takweb-version.txt out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.env }}
+          path: out/
+  pack:
+    needs: [prep, build]
+    if: always() && needs.prep.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          pattern: fw-*
+          merge-multiple: true
+      - name: Packen
+        run: |
+          tw=$(cat art/takweb-version.txt 2>/dev/null || echo "?"); rm -f art/takweb-version.txt
+          python tools/takweb_firmware/pack.py --src art --version "${{ needs.prep.outputs.fw }}" --takweb "$tw" --out pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TAKweb-Firmware
+          path: pkg/
+      - name: Als Release veröffentlichen
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          v=$(cat pkg/version.txt); tag="takweb-fw-$v"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" pkg/$v/*.zip pkg/$v/index.json --clobber
+            gh release edit "$tag" --notes-file "pkg/$v/release.md"
+          else
+            gh release create "$tag" pkg/$v/*.zip pkg/$v/index.json --target "$GITHUB_SHA" \
+              --title "TAKweb-Firmware $v (eigenes WLAN)" --notes-file "pkg/$v/release.md" --latest=false
+          fi

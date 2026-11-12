@@ -128,6 +128,24 @@ class TestTakweb(unittest.TestCase):
                          (True, "TAKweb", "12345678", "pool.ntp.org"))   # NTP bleibt
         self.assertEqual(radio.admin[1][1].reboot_seconds, 3)
 
+    def test_static_ip(self):
+        self.assertEqual(takweb.ip_u32("172.20.10.14"), 172 | 20 << 8 | 10 << 16 | 14 << 24)   # wie ESP32 IPAddress
+        self.assertEqual(takweb.static_net("172.20.10.14"), ("172.20.10.14", "172.20.10.1", "255.255.255.240", "172.20.10.1"))
+        self.assertEqual(takweb.static_net("192.168.43.50")[1:3], ("192.168.43.1", "255.255.255.0"))
+        self.assertTrue(takweb.check_wifi("TAKweb", "12345678", "300.1.1.1"))
+        self.assertTrue(takweb.check_wifi("TAKweb", "12345678", "192.168.1.1"))      # Router-Adresse
+        inst, radio = connect()
+        inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), ("TAKweb", "12345678", takweb.IPHONE_IP))
+        n = radio.admin[0][1].set_config.network
+        self.assertEqual(n.address_mode, config_pb2.Config.NetworkConfig.STATIC)
+        self.assertEqual(n.ipv4_config.ip, takweb.ip_u32("172.20.10.14"))
+        self.assertEqual(n.ipv4_config.gateway, takweb.ip_u32("172.20.10.1"))
+        self.assertEqual(n.ipv4_config.subnet, takweb.ip_u32("255.255.255.240"))
+        self.assertEqual(n.ntp_server, "pool.ntp.org")
+        # ohne feste Adresse wieder DHCP
+        inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), ("TAKweb", "12345678"))
+        self.assertEqual(radio.admin[2][1].set_config.network.address_mode, config_pb2.Config.NetworkConfig.DHCP)
+
     def test_without_wifi(self):
         inst, radio = connect()
         inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), None)
