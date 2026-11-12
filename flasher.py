@@ -486,8 +486,9 @@ class FlasherFrame(ttk.Frame):
         self.btn_tw.grid(row=3, column=4, columnspan=2, sticky="e", pady=(4, 0))
         ttk.Label(tw, text="Am einfachsten: die TAKweb-Firmware (Version „…-takweb“, „Online laden…“) mit „Komplett neu "
                            "installieren“ flashen – TAKweb ist dann schon drauf und das Gerät öffnet ein EIGENES WLAN "
-                           "(Name/Passwort wie hier, Vorgabe TAKweb / 12345678). Handy mit diesem WLAN verbinden – TAKweb "
-                           "öffnet sich von selbst, sonst http://takweb/ oder http://192.168.4.1. "
+                           "(Name/Passwort wie hier, Vorgabe TAKweb / 12345678). Handy mit diesem WLAN verbinden "
+                           "(„kein Internet“ → verbunden bleiben, mobile Daten bleiben fürs Internet), dann "
+                           "https://192.168.4.1 öffnen und das Zertifikat einmal akzeptieren. "
                            "Mit normaler Meshtastic-Firmware verbindet sich das Gerät dagegen mit einem Handy-Hotspot "
                            f"dieses Namens (iPhone: feste Adresse https://{takweb.IPHONE_IP}). "
                            "Solange WLAN an ist, ist Bluetooth am Gerät aus.",

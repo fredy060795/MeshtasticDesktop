@@ -21,10 +21,13 @@ NOTES = """**TAKweb-Firmware** für Meshtastic-Geräte mit ESP32 – das Gerät 
 **Einfach so:**
 1. Im Flasher (Meshtastic Desktop): *Online laden…* → dieses Release, oder ZIP herunterladen und *Paket importieren…*
 2. Gerät wählen (Version „{version}“) → **Komplett neu installieren** → *Firmware flashen*.
-3. Am Handy mit dem WLAN **TAKweb** verbinden (Passwort **12345678**). TAKweb öffnet sich von selbst
-   (Anmeldeseite) – sonst im Browser **http://takweb/** oder **http://192.168.4.1** öffnen.
+3. Am Handy mit dem WLAN **TAKweb** verbinden (Passwort **12345678**). Meldung „kein Internet“ → trotzdem
+   verbunden bleiben.
+4. Im Browser **https://192.168.4.1** öffnen (oder https://takweb.local) und das Zertifikat des Geräts einmal
+   akzeptieren („Erweitert“ → „Weiter“). Am besten als Lesezeichen / Home-Bildschirm ablegen.
 
-Kein Internet, kein Server, kein Handy-Hotspot nötig. Bluetooth ist am Gerät aus, solange das WLAN an ist.
+Kein Server, kein Handy-Hotspot nötig. Das Handy behält seine mobilen Daten fürs Internet – das Geräte-WLAN
+beantwortet nur „takweb“. Bluetooth ist am Gerät aus, solange das WLAN an ist.
 WLAN-Name/Passwort lassen sich im Flasher (Abschnitt 4) oder in der Meshtastic-App ändern (Netzwerk).
 Region (LoRa) nach der Neuinstallation einstellen!
 """

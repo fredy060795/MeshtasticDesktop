@@ -4,9 +4,10 @@ Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Gerä
 
 * Das Gerät öffnet ein eigenes WLAN (Access Point) statt sich mit einem zu verbinden.
   Vorgabe: Name „TAKweb“, Passwort „12345678“ (änderbar wie gewohnt: Netzwerk → WLAN-Name/Passwort).
-* Adresse immer 192.168.4.1. Ein eigener Namensdienst (DNS) beantwortet JEDEN Namen mit dieser Adresse:
-  http://takweb/, http://takweb.local, http://192.168.4.1 – alles landet bei TAKweb. Handys zeigen nach dem
-  Verbinden meist von selbst die Anmeldeseite (= TAKweb) an.
+* Adresse immer 192.168.4.1 – https://192.168.4.1 (Zertifikat des Geräts einmal akzeptieren). Ein kleiner
+  Namensdienst (DNS) beantwortet „takweb“ (https://takweb/, https://takweb.lan) mit dieser Adresse, dazu mDNS
+  https://takweb.local. Alle anderen Namen gibt es hier nicht: das Handy erkennt „WLAN ohne Internet“ und nutzt
+  fürs Internet weiter seine mobilen Daten.
 * mDNS-Name „takweb“ statt „Meshtastic“.
 * Die TAKweb-Dateien kommen in data/static (→ LittleFS-Abbild): Firmware flashen = TAKweb ist drauf.
 
@@ -52,13 +53,20 @@ static int32_t takwebDnsLoop()
         if (i + 5 > len)
             continue;
         int qend = i + 5; // Name-Ende (0) + Typ (2) + Klasse (2)
+        // nur "takweb" (takweb, takweb.local, takweb.lan …) gehört uns – alle anderen Namen gibt es hier nicht.
+        // So merkt das Handy "WLAN ohne Internet" und nimmt fürs Internet weiter seine mobilen Daten.
+        static const char me[] = "takweb";
+        bool ours = q[12] == 6;
+        for (int k = 0; ours && k < 6; k++)
+            ours = (q[13 + k] | 0x20) == me[k];
         bool isA = q[i + 1] == 0 && q[i + 2] == 1 && q[i + 3] == 0 && q[i + 4] == 1;
         uint8_t r[512 + 16];
         memcpy(r, q, qend);
         r[2] = 0x84 | (q[2] & 0x01); // Antwort, autoritativ, RD wie angefragt
-        r[3] = 0x80;                 // RA, NOERROR
+        r[3] = ours ? 0x80 : 0x83;   // RA, NOERROR – fremde Namen: NXDOMAIN (gibt es nicht)
+        isA = isA && ours;
         r[6] = 0;
-        r[7] = isA ? 1 : 0; // nur A-Anfragen bekommen die Adresse, sonst leere Antwort (Handy fragt dann A)
+        r[7] = isA ? 1 : 0; // nur A-Anfragen nach takweb bekommen die Adresse
         r[8] = r[9] = r[10] = r[11] = 0;
         int o = qend;
         if (isA) {
@@ -84,7 +92,7 @@ AP_START = r'''
             WiFi.softAP(wifiName, (wifiPsw && strlen(wifiPsw) >= 8) ? wifiPsw : NULL);
             WiFi.setSleep(false);
             esp_wifi_set_ps(WIFI_PS_NONE);
-            LOG_INFO("TAKweb WLAN '%%s' offen: http://192.168.4.1 (jeder Name fuehrt hierher)", wifiName);
+            LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", wifiName);
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
             createSSLCert();
 #endif
