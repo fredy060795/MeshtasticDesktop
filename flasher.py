@@ -484,12 +484,12 @@ class FlasherFrame(ttk.Frame):
             row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
         self.btn_tw = ttk.Button(tw, text="🗺 TAKweb aufspielen", command=self.takweb_install)
         self.btn_tw.grid(row=3, column=4, columnspan=2, sticky="e", pady=(4, 0))
-        ttk.Label(tw, text="Danach: Handy-Hotspot mit diesem Namen und Passwort einschalten (iPhone: Hotspot-Name = "
-                           "Gerätename unter Einstellungen → Allgemein → Info → Name; Passwort mind. 8 Zeichen, leer = "
-                           "offenes WLAN). Das Gerät verbindet sich. Im iPhone-Hotspot ist es mit fester Adresse immer "
-                           f"unter https://{takweb.IPHONE_IP} erreichbar (Lesezeichen anlegen!). Android-Hotspots wechseln "
-                           "ihren Adressbereich – dort „automatisch“ wählen und die IP vom Display des Geräts oder "
-                           "https://meshtastic.local nehmen. Zertifikat einmal akzeptieren. "
+        ttk.Label(tw, text="Am einfachsten: die TAKweb-Firmware (Version „…-takweb“, „Online laden…“) mit „Komplett neu "
+                           "installieren“ flashen – TAKweb ist dann schon drauf und das Gerät öffnet ein EIGENES WLAN "
+                           "(Name/Passwort wie hier, Vorgabe TAKweb / 12345678). Handy mit diesem WLAN verbinden – TAKweb "
+                           "öffnet sich von selbst, sonst http://takweb/ oder http://192.168.4.1. "
+                           "Mit normaler Meshtastic-Firmware verbindet sich das Gerät dagegen mit einem Handy-Hotspot "
+                           f"dieses Namens (iPhone: feste Adresse https://{takweb.IPHONE_IP}). "
                            "Solange WLAN an ist, ist Bluetooth am Gerät aus.",
                   foreground="gray", wraplength=1000, justify="left").grid(row=4, column=0, columnspan=6, sticky="w",
                                                                            pady=(4, 0))
