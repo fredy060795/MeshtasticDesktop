@@ -7,9 +7,7 @@ Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Gerä
 * Zusätzlich (gleichzeitig) verbindet es sich mit einem WLAN mit Internet, z. B. dem Handy-Hotspot: das ist die normale
   Meshtastic-WLAN-Einstellung (Netzwerk → WLAN-Name/Passwort, in TAKweb: Meshtastic → „Internet over WLAN“).
   Leer = nur das eigene WLAN. Mit Internet hat das Gerät Uhrzeit (NTP) und kann z. B. per MQTT ans Netz.
-* ESP32-S3-Geräte (XIAO ESP32-S3, Heltec V3, T-Beam S3, T3S3): Bluetooth bleibt neben dem WLAN an – die
-  Meshtastic-App oder ATAK verbinden sich weiter per Bluetooth (normale Meshtastic-Firmware schaltet es bei WLAN ab).
-  Alte ESP32 (Heltec V2, T-Beam, T-LoRa) haben dafür zu wenig Speicher: dort bleibt es bei WLAN ohne Bluetooth.
+* Bluetooth ist (wie bei Meshtastic mit WLAN) aus: WLAN, Bluetooth und https zusammen brauchen zu viel Speicher.
 * Adresse immer 192.168.4.1 – https://192.168.4.1 (Zertifikat des Geräts einmal akzeptieren). Ein kleiner
   Namensdienst (DNS) beantwortet „takweb“ (https://takweb/, https://takweb.lan) mit dieser Adresse, dazu mDNS
   https://takweb.local. Alle anderen Namen gibt es hier nicht: das Handy erkennt „WLAN ohne Internet“ und nutzt
@@ -182,28 +180,6 @@ def patch_wifi(fw):
     print(f"WiFiAPClient.cpp: eigenes WLAN „{ssid}“ + Internet-WLAN + DNS eingebaut")
 
 
-def patch_ble(fw):
-    """Bluetooth neben dem WLAN behalten – nur auf ESP32-S3 (genug Speicher)."""
-    p = os.path.join(fw, "src", "platform", "esp32", "main-esp32.cpp")
-    s = open(p, encoding="utf-8").read()
-    if "TAKWEB_BLE_WITH_WIFI" in s:
-        return
-    head = ("\n// TAKweb: auf ESP32-S3 bleibt Bluetooth neben dem WLAN an (genug Speicher), alte ESP32: wie Meshtastic\n"
-            "#if defined(CONFIG_IDF_TARGET_ESP32S3)\n#define TAKWEB_BLE_WITH_WIFI 1\n#else\n#define TAKWEB_BLE_WITH_WIFI 0\n#endif\n")
-    # nach dem letzten #include am Dateianfang einfügen
-    lines = s.split("\n")
-    last = max(i for i, l in enumerate(lines[:80]) if l.startswith("#include"))
-    lines.insert(last + 1, head)
-    s = "\n".join(lines)
-    s = sub_once(s, "if (!isWifiAvailable() && config.bluetooth.enabled == true)",
-                 "if ((TAKWEB_BLE_WITH_WIFI || !isWifiAvailable()) && config.bluetooth.enabled == true)", "Bluetooth bei WLAN")
-    # neuere Firmware: eigene Abfrage, ob das Netzwerk Bluetooth abschaltet (gibt sonst den BT-Speicher frei)
-    s = s.replace("static bool isNetworkConfiguredToDisableBluetooth()\n{\n#if HAS_WIFI\n    return isWifiAvailable();",
-                  "static bool isNetworkConfiguredToDisableBluetooth()\n{\n#if HAS_WIFI\n    return !TAKWEB_BLE_WITH_WIFI && isWifiAvailable();")
-    open(p, "w", encoding="utf-8").write(s)
-    print("main-esp32.cpp: Bluetooth bleibt auf ESP32-S3 neben dem WLAN an")
-
-
 def patch_prefs(fw, region="EU_868"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
@@ -235,7 +211,6 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     fw = sys.argv[1]
     patch_wifi(fw)
-    patch_ble(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])
