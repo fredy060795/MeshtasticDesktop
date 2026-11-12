@@ -2,8 +2,14 @@
 """
 Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Geräte:
 
-* Das Gerät öffnet ein eigenes WLAN (Access Point) statt sich mit einem zu verbinden.
-  Vorgabe: Name „TAKweb“, Passwort „12345678“ (änderbar wie gewohnt: Netzwerk → WLAN-Name/Passwort).
+* Das Gerät öffnet IMMER ein eigenes WLAN (Access Point): Name „TAKweb“, Passwort „12345678“
+  (beim Bauen: TAKWEB_AP_SSID / TAKWEB_AP_PSK) – auch ganz ohne Internet die letzte Rückfallebene.
+* Zusätzlich (gleichzeitig) verbindet es sich mit einem WLAN mit Internet, z. B. dem Handy-Hotspot: das ist die normale
+  Meshtastic-WLAN-Einstellung (Netzwerk → WLAN-Name/Passwort, in TAKweb: Meshtastic → „Internet over WLAN“).
+  Leer = nur das eigene WLAN. Mit Internet hat das Gerät Uhrzeit (NTP) und kann z. B. per MQTT ans Netz.
+* ESP32-S3-Geräte (XIAO ESP32-S3, Heltec V3, T-Beam S3, T3S3): Bluetooth bleibt neben dem WLAN an – die
+  Meshtastic-App oder ATAK verbinden sich weiter per Bluetooth (normale Meshtastic-Firmware schaltet es bei WLAN ab).
+  Alte ESP32 (Heltec V2, T-Beam, T-LoRa) haben dafür zu wenig Speicher: dort bleibt es bei WLAN ohne Bluetooth.
 * Adresse immer 192.168.4.1 – https://192.168.4.1 (Zertifikat des Geräts einmal akzeptieren). Ein kleiner
   Namensdienst (DNS) beantwortet „takweb“ (https://takweb/, https://takweb.lan) mit dieser Adresse, dazu mDNS
   https://takweb.local. Alle anderen Namen gibt es hier nicht: das Handy erkennt „WLAN ohne Internet“ und nutzt
@@ -27,7 +33,13 @@ HELPERS = r'''
 #ifdef ARCH_ESP32
 #include <WiFiUdp.h>
 #include <esp_netif.h>
+#define TAKWEB_AP_SSID %(ssid)s
+#define TAKWEB_AP_PSK %(psk)s
 static WiFiUDP takwebDns;
+static int32_t takwebNoUpstream()
+{
+    return 600000; // kein Internet-WLAN eingestellt: nur das eigene WLAN
+}
 static int32_t takwebDnsLoop()
 {
     uint8_t q[512];
@@ -87,10 +99,14 @@ static int32_t takwebDnsLoop()
 
 AP_START = r'''
 #ifdef ARCH_ESP32
-            // TAKweb: das Gerät öffnet ein eigenes WLAN, statt sich mit einem zu verbinden
-            WiFi.mode(WIFI_AP);
+        {
+            // TAKweb: IMMER ein eigenes WLAN – und gleichzeitig, falls eingestellt, das WLAN mit Internet (Handy-Hotspot)
+            const char *upName = config.network.wifi_ssid;
+            bool upstream = upName[0] && strcmp(upName, TAKWEB_AP_SSID) != 0;
+            WiFi.persistent(false);
+            WiFi.mode(WIFI_AP_STA);
             WiFi.softAPConfig(IPAddress(%(ip)s), IPAddress(%(ip)s), IPAddress(255, 255, 255, 0));
-            WiFi.softAP(wifiName, (wifiPsw && strlen(wifiPsw) >= 8) ? wifiPsw : NULL);
+            WiFi.softAP(TAKWEB_AP_SSID, strlen(TAKWEB_AP_PSK) >= 8 ? TAKWEB_AP_PSK : NULL);
             {
                 // per DHCP KEINEN Router angeben: das Handy sieht ein reines Nahbereichs-WLAN und nimmt fürs
                 // Internet (Karten, TAK-Server) weiter seine mobilen Daten – TAKweb kommt trotzdem von hier
@@ -105,14 +121,29 @@ AP_START = r'''
             }
             WiFi.setSleep(false);
             esp_wifi_set_ps(WIFI_PS_NONE);
-            LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", wifiName);
+            WiFi.setHostname("takweb");
+            WiFi.onEvent(WiFiEvent);
+            LOG_INFO("TAKweb WLAN '%%s' offen: https://192.168.4.1 bzw. https://takweb.local", TAKWEB_AP_SSID);
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
             createSSLCert();
 #endif
             takwebDns.begin(53);
             new Periodic("TakwebDns", takwebDnsLoop);
+            if (upstream) {
+                // Internet-WLAN (z. B. Handy-Hotspot); feste Adresse wie in Meshtastic einstellbar (iPhone: 172.20.10.14)
+                if (config.network.address_mode == meshtastic_Config_NetworkConfig_AddressMode_STATIC &&
+                    config.network.ipv4_config.ip != 0)
+                    WiFi.config(config.network.ipv4_config.ip, config.network.ipv4_config.gateway,
+                                config.network.ipv4_config.subnet, config.network.ipv4_config.dns);
+                WiFi.setAutoReconnect(true);
+                LOG_INFO("TAKweb: verbinde zusaetzlich mit dem Internet-WLAN '%%s'", upName);
+                wifiReconnect = new Periodic("WifiConnect", reconnectWiFi); // verbinden, wiederverbinden, NTP
+            } else {
+                wifiReconnect = new Periodic("WifiConnect", takwebNoUpstream);
+            }
             onNetworkConnected();
             return true;
+        }
 #endif
 ''' % {"ip": AP_IP}
 
@@ -130,39 +161,57 @@ def patch_wifi(fw):
     if "takwebDns" in s:
         print("WiFiAPClient.cpp: schon gepatcht")
         return
-    s = sub_once(s, "bool initWifi()\n{", HELPERS + "bool initWifi()\n{", "initWifi")
-    # im ersten "if (*wifiName) {" nach initWifi den Access Point starten
+    ssid, psk = os.environ.get("TAKWEB_AP_SSID", "TAKweb"), os.environ.get("TAKWEB_AP_PSK", "12345678")
+    lit = lambda v: '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    s = sub_once(s, "bool initWifi()\n{", HELPERS % {"ssid": lit(ssid), "psk": lit(psk)} + "bool initWifi()\n{", "initWifi")
+    # das eigene WLAN läuft auch ohne eingestelltes Internet-WLAN (leerer WLAN-Name)
+    cond = "if (config.network.wifi_enabled && config.network.wifi_ssid[0]) {\n"
     i = s.index("bool initWifi()\n{")
-    m = re.compile(r"\n(\s*)if \(\*wifiName\) \{\n").search(s, i)
-    if not m:
-        sys.exit("Patch: 'if (*wifiName)' in initWifi nicht gefunden.")
-    s = s[:m.end()] + AP_START + s[m.end():]
+    j = s.index(cond, i)
+    if j - i > 200:
+        sys.exit("Patch: Anfang von initWifi passt nicht.")
+    s = s[:j] + "if (config.network.wifi_enabled) {\n" + AP_START + s[j + len(cond):]
+    s = sub_once(s, "if (config.network.wifi_enabled && (config.network.wifi_ssid[0])) {",
+                 "if (config.network.wifi_enabled) {", "isWifiAvailable")
     if 'MDNS.begin("Meshtastic")' not in s:
         sys.exit("Patch: mDNS-Start nicht gefunden.")
     s = s.replace('MDNS.begin("Meshtastic")', 'MDNS.begin("takweb")')
     s = s.replace('LOG_INFO("mDNS Host: Meshtastic.local");', 'LOG_INFO("mDNS Host: takweb.local");')
     open(p, "w", encoding="utf-8").write(s)
-    print("WiFiAPClient.cpp: Access Point + DNS eingebaut")
+    print(f"WiFiAPClient.cpp: eigenes WLAN „{ssid}“ + Internet-WLAN + DNS eingebaut")
 
 
-def patch_prefs(fw, ssid="TAKweb", psk="12345678", region="EU_868"):
+def patch_ble(fw):
+    """Bluetooth neben dem WLAN behalten – nur auf ESP32-S3 (genug Speicher)."""
+    p = os.path.join(fw, "src", "platform", "esp32", "main-esp32.cpp")
+    s = open(p, encoding="utf-8").read()
+    if "TAKWEB_BLE_WITH_WIFI" in s:
+        return
+    head = ("\n// TAKweb: auf ESP32-S3 bleibt Bluetooth neben dem WLAN an (genug Speicher), alte ESP32: wie Meshtastic\n"
+            "#if defined(CONFIG_IDF_TARGET_ESP32S3)\n#define TAKWEB_BLE_WITH_WIFI 1\n#else\n#define TAKWEB_BLE_WITH_WIFI 0\n#endif\n")
+    # nach dem letzten #include am Dateianfang einfügen
+    lines = s.split("\n")
+    last = max(i for i, l in enumerate(lines[:80]) if l.startswith("#include"))
+    lines.insert(last + 1, head)
+    s = "\n".join(lines)
+    s = sub_once(s, "if (!isWifiAvailable() && config.bluetooth.enabled == true)",
+                 "if ((TAKWEB_BLE_WITH_WIFI || !isWifiAvailable()) && config.bluetooth.enabled == true)", "Bluetooth bei WLAN")
+    # neuere Firmware: eigene Abfrage, ob das Netzwerk Bluetooth abschaltet (gibt sonst den BT-Speicher frei)
+    s = s.replace("static bool isNetworkConfiguredToDisableBluetooth()\n{\n#if HAS_WIFI\n    return isWifiAvailable();",
+                  "static bool isNetworkConfiguredToDisableBluetooth()\n{\n#if HAS_WIFI\n    return !TAKWEB_BLE_WITH_WIFI && isWifiAvailable();")
+    open(p, "w", encoding="utf-8").write(s)
+    print("main-esp32.cpp: Bluetooth bleibt auf ESP32-S3 neben dem WLAN an")
+
+
+def patch_prefs(fw, region="EU_868"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
-    # Achtung: userPrefs macht aus reinen Ziffern ("12345678") eine Zahl statt Text – das Passwort setzen wir
-    # deshalb direkt in NodeDB.cpp (der Eintrag hier sorgt nur dafür, dass die Stelle übersetzt wird)
-    prefs.update({"USERPREFS_NETWORK_WIFI_ENABLED": "true", "USERPREFS_NETWORK_WIFI_SSID": ssid,
-                  "USERPREFS_NETWORK_WIFI_PSK": "takweb-psk"})
+    prefs["USERPREFS_NETWORK_WIFI_ENABLED"] = "true"  # WLAN an (eigenes WLAN; ein Internet-WLAN ist anfangs leer)
     # LoRa-Region vorbelegt: ohne Region sendet Meshtastic gar nicht – und mit WLAN an (Bluetooth aus) fragt keine App
     if region and re.fullmatch(r"[A-Z0-9_]+", region):
         prefs["USERPREFS_CONFIG_LORA_REGION"] = f"meshtastic_Config_LoRaConfig_RegionCode_{region}"
     json.dump(prefs, open(p, "w", encoding="utf-8"), indent=2)
-    n = os.path.join(fw, "src", "mesh", "NodeDB.cpp")
-    s = open(n, encoding="utf-8").read()
-    lit = '"' + psk.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    s = sub_once(s, "strncpy(config.network.wifi_psk, USERPREFS_NETWORK_WIFI_PSK,",
-                 f"strncpy(config.network.wifi_psk, {lit},", "WLAN-Passwort (NodeDB.cpp)")
-    open(n, "w", encoding="utf-8").write(s)
-    print(f"userPrefs.jsonc: WLAN an, „{ssid}“ / „{psk}“, LoRa-Region {region or '(nicht gesetzt)'}")
+    print(f"userPrefs.jsonc: WLAN an, LoRa-Region {region or '(nicht gesetzt)'}")
 
 
 def add_takweb(fw, src):
@@ -185,6 +234,7 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     fw = sys.argv[1]
     patch_wifi(fw)
+    patch_ble(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])
