@@ -34,8 +34,7 @@ beantwortet nur „takweb“.
 **Internet fürs Gerät (optional):** In TAKweb unter Meshtastic → „Internet over WLAN“ ein WLAN mit Internet wählen
 (z. B. den Handy-Hotspot). Das Gerät verbindet sich zusätzlich damit; das eigene WLAN „TAKweb“ bleibt immer an.
 
-**Bluetooth:** Auf ESP32-S3-Geräten (XIAO ESP32-S3, Heltec V3, T-Beam S3, T3S3) bleibt Bluetooth neben dem WLAN an –
-Meshtastic-App/ATAK verbinden sich wie gewohnt. Alte ESP32 (Heltec V2, T-Beam, T-LoRa): WLAN ohne Bluetooth. Bluetooth ist am Gerät aus, solange das WLAN an ist.
+**Bluetooth** ist aus, solange das WLAN läuft (wie bei Meshtastic) – TAKweb läuft über das WLAN. Bluetooth ist am Gerät aus, solange das WLAN an ist.
 WLAN-Name/Passwort lassen sich im Flasher (Abschnitt 4) oder in der Meshtastic-App ändern (Netzwerk).
 Region (LoRa) nach der Neuinstallation einstellen!
 """

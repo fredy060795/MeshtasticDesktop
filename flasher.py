@@ -456,6 +456,12 @@ class FlasherFrame(ttk.Frame):
         ttk.Label(opt, text="Tipp: Bei Board-Problemen, Bootschleifen oder Wechsel ESP32-Version → "
                             "„Komplett neu installieren“. Bei 921600 Baud Fehlern → 115200 wählen.",
                   foreground="gray").grid(row=3, column=0, columnspan=6, sticky="w")
+        ttk.Button(opt, text="🔁 Bootmodus (1200-bps-Reset)", command=self.reset_1200).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(opt, text="Gerät wird nicht erkannt? USB-Kabel mit Daten prüfen. ESP32-S3 (XIAO, Heltec V3): BOOT/USR-Taste "
+                            "beim Einstecken festhalten – oder diesen 1200-bps-Reset versuchen, dann neu flashen.",
+                  foreground="gray", wraplength=760, justify="left").grid(row=4, column=2, columnspan=4, sticky="w",
+                                                                            pady=(6, 0))
 
         tw = ttk.LabelFrame(self, text="4. TAKweb aufs Gerät (eigene WLAN-Webseite, nur ESP32)", padding=6)
         tw.pack(fill="x", pady=(6, 0))
@@ -489,7 +495,7 @@ class FlasherFrame(ttk.Frame):
                            "WLAN „TAKweb“ (Passwort 12345678): Handy verbinden, https://takweb.local öffnen, Zertifikat "
                            "einmal akzeptieren. Der Hotspot-Name hier ist dann ein ZUSÄTZLICHES WLAN mit Internet "
                            "(z. B. Handy-Hotspot), mit dem sich das Gerät außerdem verbindet – geht auch in TAKweb unter "
-                           "Meshtastic → „Internet over WLAN“. Auf ESP32-S3 (XIAO, Heltec V3) bleibt Bluetooth an. "
+                           "Meshtastic → „Internet over WLAN“. Bluetooth ist bei WLAN aus. "
                            "Mit normaler Meshtastic-Firmware verbindet sich das Gerät dagegen mit einem Handy-Hotspot "
                            f"dieses Namens (iPhone: feste Adresse https://{takweb.IPHONE_IP}). "
                            "Solange WLAN an ist, ist Bluetooth am Gerät aus.",
@@ -714,6 +720,27 @@ class FlasherFrame(ttk.Frame):
         messagebox.showinfo(APP_TITLE, f"Hardware „{hw}“ ist in der gewählten Firmware-Version nicht enthalten.\n"
                                        "Andere Version wählen oder eigene Datei flashen.", parent=self)
 
+    def reset_1200(self):
+        """1200-bps-Reset (wie im Meshtastic-Web-Flasher): bringt viele Geräte in den Boot-/Download-Modus."""
+        port = self.port()
+        if not port or self.busy:
+            if not port:
+                messagebox.showwarning(APP_TITLE, "Bitte zuerst den USB-Port wählen.", parent=self)
+            return
+        self._prepare_port(port)
+
+        def work():
+            try:
+                touch_1200(port)
+                time.sleep(2)
+                self.q.put(("call", self.refresh_ports))
+                self.q.put(("done", (True, "1200-bps-Reset gesendet. Das Gerät sollte jetzt im Bootmodus sein "
+                                           "(der Port kann sich dabei ändern – ggf. neu wählen), dann flashen.\n\n"
+                                           "Klappt es nicht: BOOT/USR-Taste beim Einstecken des USB-Kabels festhalten.")))
+            except Exception as e:
+                self.q.put(("done", (False, f"1200-bps-Reset nicht möglich: {e}")))
+        self._start(work, "Bootmodus …")
+
     def probe_chip(self):
         port = self.port()
         if not port or self.busy:
@@ -875,7 +902,8 @@ class FlasherFrame(ttk.Frame):
                 hint = "\n\nDie Firmware passt nicht zum Chip des Geräts – anderes Board wählen."
             elif "failed to connect" in msg.lower() or "timed out" in msg.lower():
                 hint = ("\n\nVerbindung zum Chip fehlgeschlagen: Baudrate 115200 versuchen, anderes USB-Kabel "
-                        "(Datenkabel!) nutzen, oder BOOT/PRG-Taste gedrückt halten und kurz RST drücken.")
+                        "(Datenkabel!) nutzen, „🔁 Bootmodus (1200-bps-Reset)“ versuchen, oder BOOT/PRG-Taste gedrückt "
+                        "halten und kurz RST drücken (ESP32-S3: BOOT beim Einstecken des Kabels festhalten).")
             self.logmsg(f"\nFEHLER: {msg}\n")
             self.q.put(("done", (False, f"Flashen fehlgeschlagen:\n{msg}{hint}")))
 
