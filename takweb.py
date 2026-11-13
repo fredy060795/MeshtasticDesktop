@@ -234,6 +234,7 @@ class RadioInstaller:
         self.my_node = 0
         self.files = []
         self.network = None
+        self.lora = None
         self.xm_timeout = 6
         self.state_lock = threading.Lock()
 
@@ -253,6 +254,8 @@ class RadioInstaller:
                 self.files.append((m.fileInfo.file_name, m.fileInfo.size_bytes))
             elif kind == "config" and m.config.WhichOneof("payload_variant") == "network":
                 self.network = m.config.network
+            elif kind == "config" and m.config.WhichOneof("payload_variant") == "lora":
+                self.lora = m.config.lora
         self.msgs.put((kind, m))
 
     def _wait(self, test, timeout, what):
@@ -378,6 +381,20 @@ class RadioInstaller:
         a.set_config.network.CopyFrom(net)
         self._admin(a)
 
+    def always_send(self):
+        """Krisengeräte senden immer: Duty-Cycle-Override an (die übrigen LoRa-Einstellungen bleiben)."""
+        from meshtastic.protobuf import admin_pb2, config_pb2
+        lora = config_pb2.Config.LoRaConfig()
+        if self.lora is not None:
+            lora.CopyFrom(self.lora)
+        if lora.override_duty_cycle:
+            return False
+        lora.override_duty_cycle = True
+        a = admin_pb2.AdminMessage()
+        a.set_config.lora.CopyFrom(lora)
+        self._admin(a)
+        return True
+
     def reboot(self, seconds=3):
         from meshtastic.protobuf import admin_pb2
         self._admin(admin_pb2.AdminMessage(reboot_seconds=seconds))
@@ -406,6 +423,9 @@ class RadioInstaller:
         if bad:
             raise TakwebError("Nicht vollständig gespeichert (Flash voll?): " + ", ".join(bad) +
                               f"\nDateisystem je nach Flash-Größe: {FS_HINT}.")
+        if self.always_send():
+            self.log("Duty-Cycle-Override eingeschaltet (Gerät sendet immer)\n")
+            time.sleep(1)
         if wifi and wifi[0]:
             progress("wifi", 0, 1)
             static_ip = wifi[2] if len(wifi) > 2 else None
