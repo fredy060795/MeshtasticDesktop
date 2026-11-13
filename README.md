@@ -67,6 +67,19 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 - **Hop-Limit**: Es ist auf **1–7** begrenzt, weil höhere Werte den Node abstürzen lassen. Auch beim Wiederherstellen eines Backups wird der Wert begrenzt.
 - **📜 Log**: App-Log und optional das Debug-Log des Geräts.
 
+## Heltec Wireless Tracker: GPS geht nicht?
+Vom Wireless Tracker gibt es drei Hardware-Versionen mit **unterschiedlicher GPS-Stromversorgung**:
+
+| Aufdruck auf der Platine | Firmware wählen |
+|---|---|
+| `HTIT-Tracker V1.0` | **Heltec Wireless Tracker V1.0** (GPS-Strom über Pin 37) |
+| `HTIT-Tracker V1.1` | Heltec Wireless Tracker V1.1 (über Vext, Pin 3) |
+| V2 | Heltec Wireless Tracker V2 |
+
+Der offizielle Web-Flasher bietet als „Wireless Tracker“ nur V1.1 an – auf einem **V1.0** bekommt das GPS damit nie Strom.
+Die TAKweb-Firmware gibt es für alle drei Versionen. Außerdem: Das GPS braucht freien Himmel (der erste Fix dauert
+draußen 1–5 Minuten) und muss in den Einstellungen an sein (Position → GPS-Modus „Aktiviert“).
+
 ## EXE und Installer bauen (Windows)
 1. Python 3.10–3.13 von python.org installieren (Häkchen bei „Add to PATH“ setzen)
 2. Optional für den Setup-Installer: [Inno Setup 6](https://jrsoftware.org/isdl.php) installieren
