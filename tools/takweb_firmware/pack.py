@@ -35,6 +35,9 @@ beantwortet nur „takweb“.
 **Internet fürs Gerät (optional):** In TAKweb unter Meshtastic → „Internet over WLAN“ ein WLAN mit Internet wählen
 (z. B. den Handy-Hotspot). Das Gerät verbindet sich zusätzlich damit; das eigene WLAN „TAKweb“ bleibt immer an.
 
+**Updates ohne USB:** Das Paket enthält den Meshtastic-OTA-Lader – spätere Firmware-Updates gehen auch per WLAN oder
+Bluetooth (z. B. bei eingegossenen Geräten).
+
 **Bluetooth** ist aus, solange das WLAN läuft (wie bei Meshtastic) – TAKweb läuft über das WLAN. Bluetooth ist am Gerät aus, solange das WLAN an ist.
 WLAN-Name/Passwort lassen sich im Flasher (Abschnitt 4) oder in der Meshtastic-App ändern (Netzwerk).
 Region (LoRa) nach der Neuinstallation einstellen!
