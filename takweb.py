@@ -235,6 +235,7 @@ class RadioInstaller:
         self.files = []
         self.network = None
         self.lora = None
+        self.position = None
         self.xm_timeout = 6
         self.state_lock = threading.Lock()
 
@@ -256,6 +257,8 @@ class RadioInstaller:
                 self.network = m.config.network
             elif kind == "config" and m.config.WhichOneof("payload_variant") == "lora":
                 self.lora = m.config.lora
+            elif kind == "config" and m.config.WhichOneof("payload_variant") == "position":
+                self.position = m.config.position
         self.msgs.put((kind, m))
 
     def _wait(self, test, timeout, what):
@@ -387,21 +390,49 @@ class RadioInstaller:
         lora = config_pb2.Config.LoRaConfig()
         if self.lora is not None:
             lora.CopyFrom(self.lora)
-        if lora.override_duty_cycle:
+        if lora.override_duty_cycle and lora.config_ok_to_mqtt:
             return False
         lora.override_duty_cycle = True
+        lora.config_ok_to_mqtt = True           # seine Nachrichten dürfen über MQTT zum Server
         a = admin_pb2.AdminMessage()
         a.set_config.lora.CopyFrom(lora)
         self._admin(a)
         return True
+
+    def set_position(self, secs=120):
+        """GPS an, Position alle secs Sekunden (bei Bewegung öfter), immer mit den GPS-Pins des Boards."""
+        from meshtastic.protobuf import admin_pb2, config_pb2
+        pos = config_pb2.Config.PositionConfig()
+        if self.position is not None:
+            pos.CopyFrom(self.position)
+        for f in ("rx_gpio", "tx_gpio", "gps_en_gpio"):   # von Hand gesetzte Pins machen GPS stumm (Tracker V1.0)
+            pos.ClearField(f)
+        pos.position_broadcast_secs = int(secs)
+        pos.position_broadcast_smart_enabled = True
+        pos.gps_mode = config_pb2.Config.PositionConfig.GpsMode.ENABLED
+        a = admin_pb2.AdminMessage()
+        a.set_config.position.CopyFrom(pos)
+        self._admin(a)
+
+    def set_mqtt(self, address, username, password, root="opentakserver", tls=True):
+        """MQTT zum TAK-Server (OpenTAKServer / WebTAK Server): Positionen und Nachrichten auch ohne Handy."""
+        from meshtastic.protobuf import admin_pb2, module_config_pb2
+        mq = module_config_pb2.ModuleConfig.MQTTConfig(
+            enabled=True, address=address, username=username, password=password, encryption_enabled=True,
+            json_enabled=False, tls_enabled=bool(tls), root=root or "opentakserver")
+        a = admin_pb2.AdminMessage()
+        a.set_module_config.mqtt.CopyFrom(mq)
+        self._admin(a)
 
     def reboot(self, seconds=3):
         from meshtastic.protobuf import admin_pb2
         self._admin(admin_pb2.AdminMessage(reboot_seconds=seconds))
 
     # -------------------------------------------------------------- alles
-    def install(self, package, wifi=None, progress=lambda step, done, total, name="": None):
-        """package: Package; wifi: (ssid, psk[, feste IP]) oder None (WLAN bleibt wie es ist)"""
+    def install(self, package, wifi=None, progress=lambda step, done, total, name="": None, options=None):
+        """package: Package; wifi: (ssid, psk[, feste IP]) oder None (WLAN bleibt wie es ist);
+        options: {"gps_secs": 120, "mqtt": {"address", "username", "password", "root", "tls"}} oder None"""
+        options = options or {}
         st = self.read_state()
         self.log(f"Gerät !{st['node']:08x}: {len(st['files'])} Dateien im Flash\n")
         old = [n for n, _ in st["files"] if n.lstrip("/").startswith("static/")]
@@ -426,6 +457,21 @@ class RadioInstaller:
         if self.always_send():
             self.log("Duty-Cycle-Override eingeschaltet (Gerät sendet immer)\n")
             time.sleep(1)
+        if options.get("gps_secs"):
+            self.set_position(options["gps_secs"])
+            self.log(f"GPS an, Position alle {options['gps_secs']} s (Pins des Boards)\n")
+            time.sleep(1)
+        mq = options.get("mqtt")
+        if mq and mq.get("address"):
+            self.set_mqtt(mq["address"], mq.get("username", ""), mq.get("password", ""), mq.get("root") or "opentakserver",
+                          mq.get("tls", True))
+            self.log(f"MQTT zum Server: {mq['address']} ({mq.get('username', '')})\n")
+            time.sleep(1)
+        if not (wifi and wifi[0]) and (options.get("gps_secs") or mq):
+            try:
+                self.reboot(3)
+            except Exception:
+                pass
         if wifi and wifi[0]:
             progress("wifi", 0, 1)
             static_ip = wifi[2] if len(wifi) > 2 else None
@@ -454,14 +500,14 @@ def check_wifi(ssid, psk, static_ip=None):
     return ""
 
 
-def install_serial(port, package, wifi=None, log=print, progress=lambda *a: None, baud=115200):
+def install_serial(port, package, wifi=None, log=print, progress=lambda *a: None, baud=115200, options=None):
     """Komplett: Port öffnen, TAKweb schreiben, WLAN setzen, Port schließen."""
     inst = None
     link = None
     try:
         inst = RadioInstaller(lambda b: link.send(b), log)
         link = SerialLink(port, inst.feed_frame, baud=baud)
-        inst.install(package, wifi, progress)
+        inst.install(package, wifi, progress, options)
     finally:
         if link:
             link.close()
