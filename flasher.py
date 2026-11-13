@@ -504,6 +504,15 @@ class FlasherFrame(ttk.Frame):
                                                                            pady=(4, 0))
         self.tw_pkg = None
 
+        ota = ttk.LabelFrame(self, text="5. Update ohne USB (eingegossene Geräte, ESP32 mit Firmware ab 2.7.18)", padding=6)
+        ota.pack(fill="x", pady=(6, 0))
+        ttk.Label(ota, text="Gerät zuerst in der App verbinden (oben: Verbindung) – per Bluetooth, oder bei TAKweb-Firmware "
+                            "per WLAN: PC ins WLAN „TAKweb-xxxx“ des Geräts, dann TCP 192.168.4.1. Firmware oben in "
+                            "Abschnitt 1/2 wählen. Das Gerät startet in den OTA-Lader und bekommt die Firmware per "
+                            "Bluetooth (PC braucht Bluetooth). Einstellungen, Knoten und TAKweb-Dateien bleiben.",
+                  foreground="gray", wraplength=780, justify="left").pack(side="left", fill="x", expand=True)
+        ttk.Button(ota, text="📡 Firmware-Update ohne USB", command=self.ota_update).pack(side="right", padx=4)
+
         act = ttk.Frame(self)
         act.pack(fill="x", pady=6)
         self.btn_flash = ttk.Button(act, text="⚡ Firmware flashen", command=self.flash_selected)
@@ -720,6 +729,74 @@ class FlasherFrame(ttk.Frame):
                 return
         messagebox.showinfo(APP_TITLE, f"Hardware „{hw}“ ist in der gewählten Firmware-Version nicht enthalten.\n"
                                        "Andere Version wählen oder eigene Datei flashen.", parent=self)
+
+    def ota_update(self):
+        """Firmware-Update ohne USB: OTA-Befehl über die App-Verbindung, Firmware per Bluetooth in den OTA-Lader."""
+        import ota_ble
+        if self.busy:
+            return
+        m = self.sel_device()
+        if not m:
+            messagebox.showinfo(APP_TITLE, "Bitte zuerst die Firmware (Abschnitt 1) und das Gerät (Abschnitt 2) wählen.", parent=self)
+            return
+        if not is_esp(chip_of(m)):
+            messagebox.showinfo(APP_TITLE, "Update ohne USB geht hier nur für ESP32-Geräte.", parent=self)
+            return
+        iface = self.get_iface()
+        if iface is None:
+            messagebox.showinfo(APP_TITLE, "Bitte das Gerät zuerst in der App verbinden (oben: Verbindung):\n\n"
+                                           "• normale Meshtastic-Firmware: per Bluetooth\n"
+                                           "• TAKweb-Firmware: PC ins WLAN „TAKweb-xxxx“ des Geräts, dann TCP 192.168.4.1",
+                                parent=self)
+            return
+        f = device_files(m)
+        try:
+            if f["app"]:
+                data = open(os.path.join(f["dir"], f["app"]), "rb").read()
+            elif f["factory"]:
+                data = open(os.path.join(f["dir"], f["factory"]), "rb").read()[f["app_off"] or 0x10000:]
+            else:
+                raise RuntimeError("Für dieses Gerät fehlt die Firmware-Datei.")
+            err = ota_ble.check_image(data)
+            if err:
+                raise RuntimeError(err)
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, str(e), parent=self)
+            return
+        name = m.get("displayName") or m.get("platformioTarget")
+        try:
+            node_num = (iface.myInfo.my_node_num if getattr(iface, "myInfo", None) else 0) or 0
+        except Exception:
+            node_num = 0
+        if not messagebox.askyesno(APP_TITLE, f"{name}\nVersion {m.get('version')} · {human(len(data))}\n\n"
+                                              "Das verbundene Gerät startet in den OTA-Lader und bekommt diese Firmware "
+                                              "per Bluetooth. Einstellungen bleiben.\n\nWichtig: genau die Firmware für "
+                                              "dieses Board wählen (z. B. Wireless Tracker V1.0 / V1.1).\n\nJetzt starten?",
+                                   parent=self):
+            return
+        lname = ota_ble.loader_name(node_num)
+
+        def work():
+            try:
+                self.q.put(("state", "OTA-Befehl …"))
+                ota_ble.request_ota(iface, data)
+                self.logmsg(f"OTA-Befehl gesendet – das Gerät startet in den OTA-Lader{f' ({lname})' if lname else ''}.\n")
+                time.sleep(2)
+                self.q.put(("call", lambda: self.disconnect_app()))
+                time.sleep(6)
+                self.q.put(("state", "Übertrage …"))
+                ota_ble.upload(data, log=self.logmsg, name=lname,
+                               progress=lambda d, t: self.q.put(("prog", 100.0 * d / max(t, 1))))
+                self.q.put(("done", (True, f"{name}: Firmware {m.get('version')} übernommen. Das Gerät startet neu.\n\n"
+                                           "Danach in der App neu verbinden.")))
+            except Exception as e:
+                self.logmsg(f"\nFEHLER: {e}\n")
+                hint = ""
+                if "startOTA" in str(e) or "OTA Loader" in str(e) or "partition" in str(e).lower():
+                    hint = ("\n\nDas Gerät hat evtl. keinen OTA-Lader (alte Firmware < 2.7.18 oder ohne Lader geflasht) – "
+                            "dann geht das Update nur einmal per USB.")
+                self.q.put(("done", (False, f"Update ohne USB nicht fertig:\n{e}{hint}")))
+        self._start(work, "Update ohne USB …")
 
     def reset_1200(self):
         """1200-bps-Reset (wie im Meshtastic-Web-Flasher): bringt viele Geräte in den Boot-/Download-Modus."""

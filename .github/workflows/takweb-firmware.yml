@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [heltec-v2_0, heltec-v2_1, tbeam, tlora-v2-1-1_6, heltec-v3, seeed-xiao-s3, tlora-t3s3-v1, tbeam-s3-core]
+        env: [heltec-v2_0, heltec-v2_1, tbeam, tlora-v2-1-1_6, heltec-v3, heltec-wsl-v3, heltec-wireless-tracker-V1-0, heltec-wireless-tracker, heltec-wireless-tracker-v2, seeed-xiao-s3, tlora-t3s3-v1, tbeam-s3-core]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -115,6 +115,13 @@ jobs:
           path: art
           pattern: fw-*
           merge-multiple: true
+      - name: OTA-Lader dazu (Updates später per WLAN/Bluetooth ohne USB)
+        run: |
+          v="${{ needs.prep.outputs.fw }}"; v="${v#v}"
+          for c in esp32 esp32s3; do
+            curl -fsSL -o "art/mt-$c-ota.bin" "https://raw.githubusercontent.com/meshtastic/meshtastic.github.io/master/firmware-$v/mt-$c-ota.bin" \
+              && echo "mt-$c-ota.bin: $(stat -c %s art/mt-$c-ota.bin) Bytes" || echo "kein OTA-Lader für $c"
+          done
       - name: Packen
         run: |
           tw=$(cat art/takweb-version.txt 2>/dev/null || echo "?"); rm -f art/takweb-version.txt

@@ -11,6 +11,8 @@ Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Gerä
   Leer = nur das eigene WLAN. Mit Internet hat das Gerät Uhrzeit (NTP) und kann z. B. per MQTT ans Netz.
 * Krisengeräte senden immer: Duty-Cycle-Override an (ab Werk und bei jedem Start) und keine Sendesperre bei hoher
   Kanalauslastung.
+* GPS immer mit den Pins des Boards – von Hand eingetragene GPS-Pins (oft falsch, z. B. Pin 3 auf dem Wireless Tracker
+  V1.0) werden ignoriert.
 * Bluetooth ist (wie bei Meshtastic mit WLAN) aus: WLAN, Bluetooth und https zusammen brauchen zu viel Speicher.
 * Adresse immer 192.168.4.1 – https://192.168.4.1 (Zertifikat des Geräts einmal akzeptieren). Ein kleiner
   Namensdienst (DNS) beantwortet „takweb“ (https://takweb/, https://takweb.lan) mit dieser Adresse, dazu mDNS
@@ -235,6 +237,26 @@ def patch_always_send(fw):
     print("NodeDB/airtime: Duty-Cycle-Override an, keine Sendesperre bei Kanalauslastung")
 
 
+def patch_gps_pins(fw):
+    """Immer die GPS-Pins des Boards: von Hand eingetragene Pins (Position → GPS RX/TX/EN GPIO) bleiben auch nach einem
+    Update gespeichert – ein falscher (z. B. Pin 3 als EN auf einem Wireless Tracker V1.0, ein Strapping-Pin des
+    ESP32-S3) schaltet das GPS nie ein oder stört den Start."""
+    p = os.path.join(fw, "src", "gps", "GPS.cpp")
+    s = open(p, encoding="utf-8").read()
+    n = 0
+    for field in ("rx_gpio", "tx_gpio", "gps_en_gpio"):
+        old = f"= config.position.{field};"
+        i = s.find("GPS::createGps()")
+        j = s.find(old, i) if i >= 0 else -1
+        if j < 0 or j - i > 600:
+            continue
+        s = s[:j] + f"= 0; // TAKweb: immer die Pins des Boards (statt config.position.{field})" + s[j + len(old):]
+        n += 1
+    if n:
+        open(p, "w", encoding="utf-8").write(s)
+    print(f"GPS.cpp: {n} von Hand setzbare GPS-Pins abgeschaltet – immer die Pins des Boards")
+
+
 def patch_prefs(fw, region="EU_868"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
@@ -267,6 +289,7 @@ if __name__ == "__main__":
     fw = sys.argv[1]
     patch_wifi(fw)
     patch_always_send(fw)
+    patch_gps_pins(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])

@@ -67,6 +67,34 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 - **Hop-Limit**: Es ist auf **1–7** begrenzt, weil höhere Werte den Node abstürzen lassen. Auch beim Wiederherstellen eines Backups wird der Wert begrenzt.
 - **📜 Log**: App-Log und optional das Debug-Log des Geräts.
 
+## Update ohne USB (eingegossene Geräte)
+Abschnitt **5. Update ohne USB** im Flasher – für ESP32-Geräte mit Firmware ab 2.7.18 (sie haben den Meshtastic-OTA-Lader;
+die TAKweb-Firmware-Pakete schreiben ihn bei der Neuinstallation mit):
+
+1. Gerät in der App verbinden: normale Meshtastic-Firmware per **Bluetooth**; TAKweb-Firmware per **WLAN** – PC ins WLAN
+   „TAKweb-xxxx“ des Geräts, dann Verbindung **TCP 192.168.4.1**.
+2. Oben Firmware-Version und genau das passende Board wählen.
+3. **📡 Firmware-Update ohne USB**: Das Gerät startet in den OTA-Lader („Meshtastic_xxxx“) und bekommt die Firmware per
+   Bluetooth (der PC braucht Bluetooth). Einstellungen, Knoten und TAKweb-Dateien bleiben.
+
+## Heltec Wireless Tracker: GPS geht nicht?
+Vom Wireless Tracker gibt es drei Hardware-Versionen mit **unterschiedlicher GPS-Stromversorgung**:
+
+| Aufdruck auf der Platine | Firmware wählen |
+|---|---|
+| `HTIT-Tracker V1.0` | **Heltec Wireless Tracker V1.0** (GPS-Strom über Pin 37) |
+| `HTIT-Tracker V1.1` | Heltec Wireless Tracker V1.1 (über Vext, Pin 3) |
+| V2 | Heltec Wireless Tracker V2 |
+
+Der offizielle Web-Flasher bietet als „Wireless Tracker“ nur V1.1 an – auf einem **V1.0** bekommt das GPS damit nie Strom.
+Die TAKweb-Firmware gibt es für alle drei Versionen.
+
+**Keine GPS-Pins von Hand eintragen:** Ein in der App gesetzter Pin (Position → GPS RX/TX/EN GPIO, z. B. „Pin 3“ auf einem
+V1.0) bleibt auch nach Updates gespeichert. Er schaltet das GPS nie ein, und Pin 3 ist beim ESP32-S3 ein Strapping-Pin,
+der den Start stören kann. Die TAKweb-Firmware ignoriert diese Einträge und nimmt immer die Pins des Boards. Bei normaler
+Meshtastic-Firmware die drei Felder auf 0 (Standard) zurücksetzen. Außerdem: Das GPS braucht freien Himmel (der erste Fix dauert
+draußen 1–5 Minuten) und muss in den Einstellungen an sein (Position → GPS-Modus „Aktiviert“).
+
 ## EXE und Installer bauen (Windows)
 1. Python 3.10–3.13 von python.org installieren (Häkchen bei „Add to PATH“ setzen)
 2. Optional für den Setup-Installer: [Inno Setup 6](https://jrsoftware.org/isdl.php) installieren
