@@ -67,6 +67,16 @@ Eine lokale PC-App für Meshtastic-Geräte, die ohne Internet läuft, inklusive 
 - **Hop-Limit**: Es ist auf **1–7** begrenzt, weil höhere Werte den Node abstürzen lassen. Auch beim Wiederherstellen eines Backups wird der Wert begrenzt.
 - **📜 Log**: App-Log und optional das Debug-Log des Geräts.
 
+## Update ohne USB (eingegossene Geräte)
+Abschnitt **5. Update ohne USB** im Flasher – für ESP32-Geräte mit Firmware ab 2.7.18 (sie haben den Meshtastic-OTA-Lader;
+die TAKweb-Firmware-Pakete schreiben ihn bei der Neuinstallation mit):
+
+1. Gerät in der App verbinden: normale Meshtastic-Firmware per **Bluetooth**; TAKweb-Firmware per **WLAN** – PC ins WLAN
+   „TAKweb-xxxx“ des Geräts, dann Verbindung **TCP 192.168.4.1**.
+2. Oben Firmware-Version und genau das passende Board wählen.
+3. **📡 Firmware-Update ohne USB**: Das Gerät startet in den OTA-Lader („Meshtastic_xxxx“) und bekommt die Firmware per
+   Bluetooth (der PC braucht Bluetooth). Einstellungen, Knoten und TAKweb-Dateien bleiben.
+
 ## Heltec Wireless Tracker: GPS geht nicht?
 Vom Wireless Tracker gibt es drei Hardware-Versionen mit **unterschiedlicher GPS-Stromversorgung**:
 
