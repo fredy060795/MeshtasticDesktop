@@ -9,6 +9,8 @@ Macht aus dem Meshtastic-Firmware-Quellcode die TAKweb-Firmware für ESP32-Gerä
 * Zusätzlich (gleichzeitig) verbindet es sich mit einem WLAN mit Internet, z. B. dem Handy-Hotspot: das ist die normale
   Meshtastic-WLAN-Einstellung (Netzwerk → WLAN-Name/Passwort, in TAKweb: Meshtastic → „Internet over WLAN“).
   Leer = nur das eigene WLAN. Mit Internet hat das Gerät Uhrzeit (NTP) und kann z. B. per MQTT ans Netz.
+* Krisengeräte senden immer: Duty-Cycle-Override an (ab Werk und bei jedem Start) und keine Sendesperre bei hoher
+  Kanalauslastung.
 * Bluetooth ist (wie bei Meshtastic mit WLAN) aus: WLAN, Bluetooth und https zusammen brauchen zu viel Speicher.
 * Adresse immer 192.168.4.1 – https://192.168.4.1 (Zertifikat des Geräts einmal akzeptieren). Ein kleiner
   Namensdienst (DNS) beantwortet „takweb“ (https://takweb/, https://takweb.lan) mit dieser Adresse, dazu mDNS
@@ -200,6 +202,7 @@ def patch_wifi(fw):
         sys.exit("Patch: Anfang von initWifi passt nicht.")
     # das eigene WLAN ist IMMER an – auch wenn alte, behaltene Einstellungen (Update) WLAN aus haben
     s = s[:j] + ("config.network.wifi_enabled = true; // TAKweb: eigenes WLAN immer (nur im Speicher)\n"
+                 "    config.lora.override_duty_cycle = true; // TAKweb: Krisengeräte senden immer\n"
                  "    if (config.network.wifi_enabled) {\n") + AP_START + s[j + len(cond):]
     s = sub_once(s, "if (config.network.wifi_enabled && (config.network.wifi_ssid[0])) {",
                  "if (config.network.wifi_enabled) {", "isWifiAvailable")
@@ -209,6 +212,27 @@ def patch_wifi(fw):
     s = s.replace('LOG_INFO("mDNS Host: Meshtastic.local");', 'LOG_INFO("mDNS Host: takweb.local");')
     open(p, "w", encoding="utf-8").write(s)
     print(f"WiFiAPClient.cpp: eigenes WLAN „{ssid}-xxxx“ + Internet-WLAN + DNS eingebaut")
+
+
+def patch_always_send(fw):
+    """Krisengeräte senden immer: Duty-Cycle-Override ab Werk an, und keine Sendesperre bei hoher Kanalauslastung."""
+    n = os.path.join(fw, "src", "mesh", "NodeDB.cpp")
+    s = open(n, encoding="utf-8").read()
+    s = sub_once(s, "config.lora.override_duty_cycle = false;",
+                 "config.lora.override_duty_cycle = true; // TAKweb: Krisengeräte senden immer", "Duty-Cycle (NodeDB.cpp)")
+    open(n, "w", encoding="utf-8").write(s)
+    a = os.path.join(fw, "src", "airtime.cpp")
+    s = open(a, encoding="utf-8").read()
+    s = sub_once(s, "bool AirTime::isTxAllowedChannelUtil(bool polite)\n{\n",
+                 "bool AirTime::isTxAllowedChannelUtil(bool polite)\n{\n"
+                 "    (void)polite;\n    return true; // TAKweb: Krisengeräte senden auch bei hoher Kanalauslastung\n"
+                 "#if 0\n", "Kanalauslastung (airtime.cpp)")
+    # die alte Funktion bis zu ihrem Ende ausblenden
+    i = s.index("#if 0\n", s.index("bool AirTime::isTxAllowedChannelUtil"))
+    end = s.index("\n}\n", i)
+    s = s[:end] + "\n#endif" + s[end:]
+    open(a, "w", encoding="utf-8").write(s)
+    print("NodeDB/airtime: Duty-Cycle-Override an, keine Sendesperre bei Kanalauslastung")
 
 
 def patch_prefs(fw, region="EU_868"):
@@ -242,6 +266,7 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     fw = sys.argv[1]
     patch_wifi(fw)
+    patch_always_send(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])

@@ -51,6 +51,7 @@ class FakeRadio:
         if k == "want_config_id":
             self.out(my_info=mesh_pb2.MyNodeInfo(my_node_num=self.node))
             self.out(config=config_pb2.Config(network=self.net))
+            self.out(config=config_pb2.Config(lora=config_pb2.Config.LoRaConfig(region=3, use_preset=True, hop_limit=5)))
             for n, v in self.fs.items():
                 self.out(fileInfo=mesh_pb2.FileInfo(file_name=n, size_bytes=len(v)))
             self.out(config_complete_id=m.want_config_id)
@@ -121,12 +122,12 @@ class TestTakweb(unittest.TestCase):
         self.assertEqual(gzip.decompress(radio.fs["/static/index.html.gz"]), b"<html>TAKweb</html>")
         self.assertEqual(steps[-1], "done")
         self.assertIn("wifi", steps)
-        to, cfg = radio.admin[0]
+        to, cfg = [x for x in radio.admin if x[1].set_config.HasField("network")][0]
         self.assertEqual(to, radio.node)
         n = cfg.set_config.network
         self.assertEqual((n.wifi_enabled, n.wifi_ssid, n.wifi_psk, n.ntp_server),
                          (True, "TAKweb", "12345678", "pool.ntp.org"))   # NTP bleibt
-        self.assertEqual(radio.admin[1][1].reboot_seconds, 3)
+        self.assertEqual([a for _, a in radio.admin if a.reboot_seconds][0].reboot_seconds, 3)
 
     def test_static_ip(self):
         self.assertEqual(takweb.ip_u32("172.20.10.14"), 172 | 20 << 8 | 10 << 16 | 14 << 24)   # wie ESP32 IPAddress
@@ -136,7 +137,7 @@ class TestTakweb(unittest.TestCase):
         self.assertTrue(takweb.check_wifi("TAKweb", "12345678", "192.168.1.1"))      # Router-Adresse
         inst, radio = connect()
         inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), ("TAKweb", "12345678", takweb.IPHONE_IP))
-        n = radio.admin[0][1].set_config.network
+        n = [a for _, a in radio.admin if a.set_config.HasField("network")][0].set_config.network
         self.assertEqual(n.address_mode, config_pb2.Config.NetworkConfig.STATIC)
         self.assertEqual(n.ipv4_config.ip, takweb.ip_u32("172.20.10.14"))
         self.assertEqual(n.ipv4_config.gateway, takweb.ip_u32("172.20.10.1"))
@@ -144,12 +145,20 @@ class TestTakweb(unittest.TestCase):
         self.assertEqual(n.ntp_server, "pool.ntp.org")
         # ohne feste Adresse wieder DHCP
         inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), ("TAKweb", "12345678"))
-        self.assertEqual(radio.admin[2][1].set_config.network.address_mode, config_pb2.Config.NetworkConfig.DHCP)
+        self.assertEqual([a for _, a in radio.admin if a.set_config.HasField("network")][-1].set_config.network.address_mode,
+                         config_pb2.Config.NetworkConfig.DHCP)
+
+    def test_always_send(self):
+        inst, radio = connect()
+        inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), None)
+        lora = [a for _, a in radio.admin if a.set_config.HasField("lora")][0].set_config.lora
+        self.assertTrue(lora.override_duty_cycle)
+        self.assertEqual((lora.region, lora.hop_limit, lora.use_preset), (3, 5, True))  # Rest bleibt
 
     def test_without_wifi(self):
         inst, radio = connect()
         inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), None)
-        self.assertEqual(radio.admin, [])
+        self.assertFalse([a for _, a in radio.admin if a.set_config.HasField("network")])
 
     def test_flash_full(self):
         inst, radio = connect(capacity=600)
