@@ -52,6 +52,7 @@ class FakeRadio:
             self.out(my_info=mesh_pb2.MyNodeInfo(my_node_num=self.node))
             self.out(config=config_pb2.Config(network=self.net))
             self.out(config=config_pb2.Config(lora=config_pb2.Config.LoRaConfig(region=3, use_preset=True, hop_limit=5)))
+            self.out(config=config_pb2.Config(position=config_pb2.Config.PositionConfig(gps_en_gpio=3, rx_gpio=44, fixed_position=False)))
             for n, v in self.fs.items():
                 self.out(fileInfo=mesh_pb2.FileInfo(file_name=n, size_bytes=len(v)))
             self.out(config_complete_id=m.want_config_id)
@@ -154,6 +155,21 @@ class TestTakweb(unittest.TestCase):
         lora = [a for _, a in radio.admin if a.set_config.HasField("lora")][0].set_config.lora
         self.assertTrue(lora.override_duty_cycle)
         self.assertEqual((lora.region, lora.hop_limit, lora.use_preset), (3, 5, True))  # Rest bleibt
+
+    def test_gps_mqtt_gateway(self):
+        inst, radio = connect()
+        opts = {"gps_secs": 900, "mqtt": {"address": "tak.example.org:8883", "username": "radio", "password": "pw-123456", "tls": True}}
+        inst.install(takweb.Package.from_zip(make_zip({"index.html": b"x"})), ("HQ-WLAN", "hq-pass-123"), options=opts)
+        pos = [a for _, a in radio.admin if a.set_config.HasField("position")][0].set_config.position
+        self.assertEqual((pos.position_broadcast_secs, pos.position_broadcast_smart_enabled, pos.gps_en_gpio, pos.rx_gpio),
+                         (900, True, 0, 0))                     # von Hand gesetzte GPS-Pins sind weg
+        self.assertEqual(pos.gps_mode, config_pb2.Config.PositionConfig.GpsMode.ENABLED)
+        mq = [a for _, a in radio.admin if a.set_module_config.HasField("mqtt")][0].set_module_config.mqtt
+        self.assertEqual((mq.enabled, mq.address, mq.username, mq.encryption_enabled, mq.tls_enabled, mq.json_enabled, mq.root),
+                         (True, "tak.example.org:8883", "radio", True, True, False, "opentakserver"))
+        lora = [a for _, a in radio.admin if a.set_config.HasField("lora")][0].set_config.lora
+        self.assertTrue(lora.config_ok_to_mqtt)
+        self.assertEqual([a for _, a in radio.admin if a.set_config.HasField("network")][0].set_config.network.wifi_ssid, "HQ-WLAN")
 
     def test_without_wifi(self):
         inst, radio = connect()

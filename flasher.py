@@ -371,6 +371,8 @@ class _QueueWriter(io.TextIOBase):
 # ======================================================================================
 class FlasherFrame(ttk.Frame):
     TW_IPHONE = f"{takweb.IPHONE_IP}  (fest – iPhone-Hotspot)"
+    TW_FIELD = "Feldgerät (GPS-Position übers Mesh)"
+    TW_GATEWAY = "HQ-Gateway (immer an, Internet übers HQ-WLAN, reicht das Mesh zum Server)"
     TW_DHCP = "automatisch (vom Hotspot, DHCP)"
 
     def __init__(self, parent, data_dir=None, settings=None, save_settings=None,
@@ -490,6 +492,26 @@ class FlasherFrame(ttk.Frame):
             row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
         self.btn_tw = ttk.Button(tw, text="🗺 TAKweb aufspielen", command=self.takweb_install)
         self.btn_tw.grid(row=3, column=4, columnspan=2, sticky="e", pady=(4, 0))
+        # Rolle, GPS, MQTT – wie im TAKweb-Admin („Set up a radio“)
+        ttk.Label(tw, text="Rolle:").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.v_tw_role = tk.StringVar(value=self.settings.get("takweb_role", self.TW_FIELD))
+        ttk.Combobox(tw, textvariable=self.v_tw_role, width=44, state="readonly", values=[self.TW_FIELD, self.TW_GATEWAY]).grid(
+            row=4, column=1, columnspan=3, sticky="w", padx=4, pady=(6, 0))
+        ttk.Label(tw, text="GPS alle (s):").grid(row=4, column=4, sticky="e", pady=(6, 0))
+        self.v_tw_gps = tk.StringVar(value=str(self.settings.get("takweb_gps", 120)))
+        ttk.Spinbox(tw, from_=0, to=3600, increment=30, textvariable=self.v_tw_gps, width=6).grid(row=4, column=5, sticky="w", pady=(6, 0))
+        self.v_tw_mqtt = tk.BooleanVar(value=self.settings.get("takweb_mqtt", False))
+        ttk.Checkbutton(tw, text="MQTT zum Server:", variable=self.v_tw_mqtt).grid(row=5, column=0, sticky="w", pady=(4, 0))
+        self.v_tw_mq_addr = tk.StringVar(value=self.settings.get("takweb_mq_addr", ""))
+        ttk.Entry(tw, textvariable=self.v_tw_mq_addr, width=30).grid(row=5, column=1, sticky="w", padx=4, pady=(4, 0))
+        self.v_tw_mq_user = tk.StringVar(value=self.settings.get("takweb_mq_user", "takweb_mesh_mqtt"))
+        ttk.Entry(tw, textvariable=self.v_tw_mq_user, width=20).grid(row=5, column=2, columnspan=2, sticky="w", padx=4, pady=(4, 0))
+        self.v_tw_mq_pw = tk.StringVar(value=self.settings.get("takweb_mq_pw", ""))
+        ttk.Entry(tw, textvariable=self.v_tw_mq_pw, width=18, show="•").grid(row=5, column=4, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Label(tw, text="MQTT: Adresse server:8883 (TLS) · Benutzer · Passwort eines Benutzers des TAK-Servers (WebTAK Server / "
+                           "OpenTAKServer). HQ-Gateway: das Gerät geht über den Hotspot-Namen oben (HQ-WLAN) ins Internet und "
+                           "reicht das ganze Mesh an den Server weiter – auch wenn kein Handy verbunden ist.",
+                  foreground="gray", wraplength=1000, justify="left").grid(row=6, column=0, columnspan=6, sticky="w", pady=(2, 0))
         ttk.Label(tw, text="Am einfachsten: die TAKweb-Firmware (Version „…-takweb“, „Online laden…“) mit „Komplett neu "
                            "installieren“ flashen – TAKweb ist dann schon drauf und das Gerät öffnet IMMER ein eigenes "
                            "WLAN „TAKweb-xxxx“ (eigener Name je Gerät, Passwort 12345678): Handy verbinden, "
@@ -500,7 +522,7 @@ class FlasherFrame(ttk.Frame):
                            "Mit normaler Meshtastic-Firmware verbindet sich das Gerät dagegen mit einem Handy-Hotspot "
                            f"dieses Namens (iPhone: feste Adresse https://{takweb.IPHONE_IP}). "
                            "Solange WLAN an ist, ist Bluetooth am Gerät aus.",
-                  foreground="gray", wraplength=1000, justify="left").grid(row=4, column=0, columnspan=6, sticky="w",
+                  foreground="gray", wraplength=1000, justify="left").grid(row=7, column=0, columnspan=6, sticky="w",
                                                                            pady=(4, 0))
         self.tw_pkg = None
 
@@ -1060,10 +1082,27 @@ class FlasherFrame(ttk.Frame):
             if err:
                 return fail(err)
             wifi = (ssid, psk, static_ip)
+        gateway = self.v_tw_role.get() == self.TW_GATEWAY
+        if gateway and not wifi:
+            return fail("Das HQ-Gateway braucht das HQ-WLAN mit Internet: oben Hotspot-Name und Passwort eintragen "
+                        "und „WLAN am Gerät setzen“ anhaken.")
+        try:
+            gps = int(self.v_tw_gps.get() or 0)
+        except ValueError:
+            return fail("GPS-Intervall: Sekunden als Zahl (0 = GPS nicht ändern).")
+        options = {"gps_secs": (900 if gateway and gps == 120 else gps) or None}
+        if self.v_tw_mqtt.get():
+            addr = self.v_tw_mq_addr.get().strip()
+            if not addr or not self.v_tw_mq_user.get().strip() or not self.v_tw_mq_pw.get():
+                return fail("MQTT: Adresse (z. B. tak.example.org:8883), Benutzer und Passwort eintragen.")
+            options["mqtt"] = {"address": addr, "username": self.v_tw_mq_user.get().strip(), "password": self.v_tw_mq_pw.get(),
+                               "root": "opentakserver", "tls": True}
         self.settings.update(takweb_ssid=ssid, takweb_psk=psk, takweb_wifi=self.v_tw_wifi.get(), takweb_ip=ip_txt,
-                             takweb_after=self.v_tw_after.get())
+                             takweb_after=self.v_tw_after.get(), takweb_role=self.v_tw_role.get(), takweb_gps=gps,
+                             takweb_mqtt=self.v_tw_mqtt.get(), takweb_mq_addr=self.v_tw_mq_addr.get().strip(),
+                             takweb_mq_user=self.v_tw_mq_user.get().strip())   # Passwort wird nicht gespeichert
         self.save_settings(self.settings)
-        return self.tw_pkg, wifi
+        return self.tw_pkg, wifi, options
 
     def takweb_install(self):
         if self.busy:
@@ -1075,7 +1114,7 @@ class FlasherFrame(ttk.Frame):
         params = self._takweb_params()
         if not params:
             return
-        pkg, wifi = params
+        pkg, wifi, options = params
         txt = (f"TAKweb {pkg.version} ({human(pkg.total)}) auf das Gerät an {port} schreiben?\n\n"
                "Die bisherige Web-Oberfläche des Geräts (/static) wird ersetzt, Einstellungen und Knoten bleiben."
                + (f"\n\nWLAN danach: „{wifi[0]}“, Adresse " + (wifi[2] or "automatisch (DHCP)")
@@ -1083,9 +1122,9 @@ class FlasherFrame(ttk.Frame):
         if not messagebox.askyesno(APP_TITLE, txt, parent=self):
             return
         self._prepare_port(port)
-        self._start(lambda: self._takweb_work(port, pkg, wifi), "TAKweb …")
+        self._start(lambda: self._takweb_work(port, pkg, wifi, options), "TAKweb …")
 
-    def _takweb_work(self, port, pkg, wifi, first_wait=0):
+    def _takweb_work(self, port, pkg, wifi, options=None, first_wait=0):
         labels = {"remove": "Alte Web-Dateien löschen", "upload": "Schreibe TAKweb", "check": "Prüfe",
                   "wifi": "Setze WLAN", "done": "Fertig"}
 
@@ -1101,7 +1140,7 @@ class FlasherFrame(ttk.Frame):
             # nach dem Flashen braucht das Gerät etwas, bis die API antwortet (Port kann kurz weg sein)
             for attempt in range(4 if first_wait else 1):
                 try:
-                    takweb.install_serial(port, pkg, wifi, log=self.logmsg, progress=progress)
+                    takweb.install_serial(port, pkg, wifi, log=self.logmsg, progress=progress, options=options)
                     last = None
                     break
                 except Exception as e:
