@@ -87,7 +87,12 @@ Vom Wireless Tracker gibt es drei Hardware-Versionen mit **unterschiedlicher GPS
 | V2 | Heltec Wireless Tracker V2 |
 
 Der offizielle Web-Flasher bietet als „Wireless Tracker“ nur V1.1 an – auf einem **V1.0** bekommt das GPS damit nie Strom.
-Die TAKweb-Firmware gibt es für alle drei Versionen. Außerdem: Das GPS braucht freien Himmel (der erste Fix dauert
+Die TAKweb-Firmware gibt es für alle drei Versionen.
+
+**Keine GPS-Pins von Hand eintragen:** Ein in der App gesetzter Pin (Position → GPS RX/TX/EN GPIO, z. B. „Pin 3“ auf einem
+V1.0) bleibt auch nach Updates gespeichert. Er schaltet das GPS nie ein, und Pin 3 ist beim ESP32-S3 ein Strapping-Pin,
+der den Start stören kann. Die TAKweb-Firmware ignoriert diese Einträge und nimmt immer die Pins des Boards. Bei normaler
+Meshtastic-Firmware die drei Felder auf 0 (Standard) zurücksetzen. Außerdem: Das GPS braucht freien Himmel (der erste Fix dauert
 draußen 1–5 Minuten) und muss in den Einstellungen an sein (Position → GPS-Modus „Aktiviert“).
 
 ## EXE und Installer bauen (Windows)
