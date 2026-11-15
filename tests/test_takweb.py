@@ -29,6 +29,7 @@ class FakeRadio:
         self.fs = {"/static/index.html.gz": b"old", "/static/old.js.gz": b"x" * 10, "/prefs/config.proto": b"c"}
         self.net = config_pb2.Config.NetworkConfig(ntp_server="pool.ntp.org", wifi_ssid="alt")
         self.cur = None
+        self.receiving = False
         self.admin = []
         self.lost = 0           # so viele XModem-Antworten gehen verloren (Test: Wiederholung)
 
@@ -58,8 +59,11 @@ class FakeRadio:
             self.out(config_complete_id=m.want_config_id)
         elif k == "xmodemPacket":
             x = m.xmodemPacket
+            if x.control == X.SOH and x.seq == 0 and self.cur and self.receiving:
+                return self.ack(X.NAK)                        # noch beim Empfangen: neue Datei abgelehnt (Firmware)
             if x.control == X.SOH and x.seq == 0:
-                self.cur = x.buffer.decode()
+                self.cur = x.buffer.split(b"\0")[0].decode()   # C-String wie in der Firmware
+                self.receiving = True
                 self.fs.pop(self.cur, None)
                 self.fs[self.cur] = b""
                 self.ack(X.ACK)
@@ -71,8 +75,10 @@ class FakeRadio:
                 self.ack(X.ACK)
             elif x.control == X.CAN:
                 self.fs.pop(self.cur, None)
+                self.receiving = False
                 self.ack(X.ACK)
             elif x.control == X.EOT:
+                self.receiving = False
                 self.ack(X.ACK)
         elif k == "packet" and m.packet.decoded.portnum == portnums_pb2.PortNum.ADMIN_APP:
             a = admin_pb2.AdminMessage()
@@ -170,6 +176,12 @@ class TestTakweb(unittest.TestCase):
         lora = [a for _, a in radio.admin if a.set_config.HasField("lora")][0].set_config.lora
         self.assertTrue(lora.config_ok_to_mqtt)
         self.assertEqual([a for _, a in radio.admin if a.set_config.HasField("network")][0].set_config.network.wifi_ssid, "HQ-WLAN")
+
+    def test_hanging_transfer(self):
+        inst, radio = connect()
+        radio.cur, radio.receiving = "/static/kaputt.gz", True      # abgebrochene Übertragung (USB-Port gewechselt)
+        inst.install(takweb.Package.from_zip(make_zip({"index.html": b"<html>"})), None)
+        self.assertEqual(gzip.decompress(radio.fs["/static/index.html.gz"]), b"<html>")
 
     def test_without_wifi(self):
         inst, radio = connect()

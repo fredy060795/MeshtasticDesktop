@@ -308,15 +308,26 @@ class RadioInstaller:
         return self._wait(lambda k, m: k == "xmodemPacket", timeout or self.xm_timeout, "Dateiübertragung").xmodemPacket.control
 
     def _open(self, name):
-        """Datei im Flash zum Schreiben öffnen (eine vorhandene wird dabei geleert), mit Wiederholung"""
+        """Datei im Flash zum Schreiben öffnen (eine vorhandene wird dabei geleert), mit Wiederholung.
+        Der Name geht mit Endezeichen hinaus (die Firmware kopiert ihn ohne in ihren Puffer); lehnt das Gerät ab, weil
+        eine abgebrochene Übertragung noch offen ist, wird diese erst mit EOT beendet (es wird nichts gelöscht)."""
         from meshtastic.protobuf import xmodem_pb2 as X
-        for _ in range(3):
+        why = "keine Antwort"
+        for _ in range(4):
             try:
-                if self.xm(X.XModem.SOH, 0, name.encode("utf-8")) == X.XModem.ACK:
-                    return
+                c = self.xm(X.XModem.SOH, 0, name.encode("utf-8") + b"\0")
             except TakwebError:
-                pass
-        raise TakwebError(f"Das Gerät nimmt {name} nicht an")
+                c = None
+            if c == X.XModem.ACK:
+                return
+            if c == X.XModem.NAK:
+                why = "abgelehnt (NAK)"
+                try:
+                    self.xm(X.XModem.EOT)
+                except TakwebError:
+                    pass
+            time.sleep(0.3)
+        raise TakwebError(f"Das Gerät nimmt {name} nicht an ({why})")
 
     def remove(self, name):
         from meshtastic.protobuf import xmodem_pb2 as X
