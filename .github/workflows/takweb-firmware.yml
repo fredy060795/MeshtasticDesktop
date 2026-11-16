@@ -73,8 +73,11 @@ jobs:
             const fs = require('fs');
             // 8 MB boards (ESP32-S3): detailed world map, 4 MB boards (1 MB file system): the small one
             const map = /s3/.test('${{ matrix.env }}') ? 'full' : 'small';
-            const b = require('./lib/meshsite').build(require('./package.json').version, '', map);
-            console.log('Weltkarte:', map);
+            // Heltec Wireless Tracker (ohne PSRAM): die TAKweb-Seite als eine Datei (Grundfunktionen), der Rest kommt
+            // vom TAKweb-Server – sonst reicht der Speicher nicht für die vielen HTTPS-Verbindungen (lib/meshsite.js)
+            const lite = /^heltec-wireless-tracker/.test('${{ matrix.env }}');
+            const b = require('./lib/meshsite').build(require('./package.json').version, '', map, lite);
+            console.log('Weltkarte:', b.map || map, lite ? '(Lite-Seite: eine Datei)' : '');
             for (const f of b.files) fs.writeFileSync('../takweb-static/' + f.name + '.gz', f.gz);
             console.log('TAKweb', b.version, b.files.length, 'Dateien', b.total, 'Bytes');
             fs.writeFileSync('../takweb-version.txt', b.version);"
