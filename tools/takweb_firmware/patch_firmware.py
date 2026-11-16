@@ -279,6 +279,20 @@ def patch_memory(fw):
                  "Knotenzahl (mesh-pb-constants.h)")
     open(p, "w", encoding="utf-8").write(s)
     print("mesh-pb-constants.h: ohne PSRAM 60 Knoten (Speicher für HTTPS)")
+    # HTTPS: eine Verbindung braucht ~40 KB. Meshtastic lässt 2 zu und bearbeitet HTTPS gar nicht mehr, sobald weniger als
+    # 40 KB frei sind – auch die schon offene Verbindung nicht: nach dem ersten Aufbau (71 KB → 28 KB frei) blieb
+    # "GET /" für immer hängen. Auf dem Tracker: 1 Verbindung (der Browser lädt die Dateien nacheinander) und weiter
+    # bearbeiten, solange noch 12 KB frei sind (reicht der Speicher für einen Aufbau nicht, scheitert nur dieser).
+    w = os.path.join(fw, "src", "mesh", "http", "WebServer.cpp")
+    t = open(w, encoding="utf-8").read()
+    n = 0
+    for old, new in (("static const uint8_t MAX_HTTPS_CONNECTIONS = 2;", "static const uint8_t MAX_HTTPS_CONNECTIONS = 1; // TAKweb: Tracker ohne PSRAM"),
+                     ("static const uint32_t MIN_HEAP_FOR_SSL = 40000;", "static const uint32_t MIN_HEAP_FOR_SSL = 12000; // TAKweb: offene Verbindung weiter bedienen")):
+        if t.count(old) == 1:
+            t = t.replace(old, new)
+            n += 1
+    open(w, "w", encoding="utf-8").write(t)
+    print(f"WebServer.cpp: {n} von 2 HTTPS-Grenzen angepasst (1 Verbindung, weiter ab 12 KB frei)")
 
 
 def patch_prefs(fw, region="EU_868"):
