@@ -261,7 +261,7 @@ def patch_gps_pins(fw):
 
 
 def patch_memory(fw):
-    """Boards ohne PSRAM (Heltec V3, Wireless Tracker, …): Meshtastic legt die Knotenliste für 200 Geräte im internen
+    """Heltec Wireless Tracker (ohne PSRAM; nur mit TAKWEB_LOWMEM=1, gesetzt vom Workflow): Meshtastic legt die Knotenliste für 200 Geräte im internen
     Speicher an (~40 KB). Zusammen mit Bildschirm, GPS und zwei WLANs bleiben dann unter 40 KB frei – zu wenig für
     HTTPS, die TAKweb-Seite kommt nicht ("Low heap, skipping HTTPS processing"). Ohne PSRAM: 60 Knoten."""
     p = os.path.join(fw, "src", "mesh", "mesh-pb-constants.h")
@@ -314,7 +314,8 @@ if __name__ == "__main__":
     patch_wifi(fw)
     patch_always_send(fw)
     patch_gps_pins(fw)
-    patch_memory(fw)
+    if os.environ.get("TAKWEB_LOWMEM") == "1":  # nur Heltec Wireless Tracker (siehe Workflow)
+        patch_memory(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])

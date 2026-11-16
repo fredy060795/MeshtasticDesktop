@@ -82,6 +82,7 @@ jobs:
         run: |
           git clone --depth 1 --branch "${{ needs.prep.outputs.fw }}" --recurse-submodules --shallow-submodules \
             https://github.com/meshtastic/firmware fw
+          TAKWEB_LOWMEM="${{ startsWith(matrix.env, 'heltec-wireless-tracker') && '1' || '' }}" \
           TAKWEB_REGION="${{ github.event.inputs.region || 'EU_868' }}" python tools/takweb_firmware/patch_firmware.py fw takweb-static
       - uses: actions/cache@v4
         with:
@@ -90,9 +91,9 @@ jobs:
           restore-keys: pio-${{ matrix.env }}-
       - name: Bauen
         env:
-          # TAKweb-Funkgeräte laufen immer über WLAN (Bluetooth ist dabei ohnehin aus): ohne Bluetooth bleibt auf Boards
-          # ohne PSRAM (Heltec V3, Wireless Tracker) genug Speicher für HTTPS und die TAKweb-Seite
-          PLATFORMIO_BUILD_FLAGS: -DMESHTASTIC_EXCLUDE_BLUETOOTH=1
+          # nur Heltec Wireless Tracker (V1.0/V1.1/V2, ohne PSRAM): ohne Bluetooth (bei TAKweb ohnehin aus, WLAN ist immer
+          # an) bleibt genug Speicher für HTTPS und die TAKweb-Seite – alle anderen Boards bleiben unverändert
+          PLATFORMIO_BUILD_FLAGS: ${{ startsWith(matrix.env, 'heltec-wireless-tracker') && '-DMESHTASTIC_EXCLUDE_BLUETOOTH=1' || '' }}
         run: |
           pip install -U platformio
           cd fw && pio run -e "${{ matrix.env }}" -t mtjson
