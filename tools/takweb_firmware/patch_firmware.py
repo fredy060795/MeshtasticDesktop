@@ -37,6 +37,7 @@ HELPERS = r'''
 #ifdef ARCH_ESP32
 #include <WiFiUdp.h>
 #include <esp_netif.h>
+#include <esp_heap_caps.h>
 #include "FSCommon.h"
 #include "SPILock.h"
 #define TAKWEB_AP_SSID %(ssid)s
@@ -162,6 +163,8 @@ AP_START = r'''
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
             createSSLCert();
 #endif
+            LOG_INFO("TAKweb: freier Speicher %%u Bytes (groesster Block %%u, PSRAM %%s)", (unsigned)ESP.getFreeHeap(),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), psramFound() ? "ja" : "nein");
             takwebDns.begin(53);
             new Periodic("TakwebDns", takwebDnsLoop);
             if (upstream) {
@@ -257,6 +260,27 @@ def patch_gps_pins(fw):
     print(f"GPS.cpp: {n} von Hand setzbare GPS-Pins abgeschaltet – immer die Pins des Boards")
 
 
+def patch_memory(fw):
+    """Heltec Wireless Tracker (ohne PSRAM; nur mit TAKWEB_LOWMEM=1, gesetzt vom Workflow): Meshtastic legt die Knotenliste für 200 Geräte im internen
+    Speicher an (~40 KB). Zusammen mit Bildschirm, GPS und zwei WLANs bleiben dann unter 40 KB frei – zu wenig für
+    HTTPS, die TAKweb-Seite kommt nicht ("Low heap, skipping HTTPS processing"). Ohne PSRAM: 60 Knoten."""
+    p = os.path.join(fw, "src", "mesh", "mesh-pb-constants.h")
+    s = open(p, encoding="utf-8").read()
+    if "TAKweb: ohne PSRAM" in s:
+        print("mesh-pb-constants.h: schon gepatcht")
+        return
+    anchor = "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n"
+    if s.count(anchor) != 1:
+        print("mesh-pb-constants.h: Knotenzahl nicht gefunden – unverändert (diese Firmware-Version)")
+        return
+    s = sub_once(s, "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n",
+                 "    if (!psramFound())\n        return 60; // TAKweb: ohne PSRAM Speicher für HTTPS (TAKweb-Seite) lassen\n"
+                 "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n",
+                 "Knotenzahl (mesh-pb-constants.h)")
+    open(p, "w", encoding="utf-8").write(s)
+    print("mesh-pb-constants.h: ohne PSRAM 60 Knoten (Speicher für HTTPS)")
+
+
 def patch_prefs(fw, region="EU_868"):
     p = os.path.join(fw, "userPrefs.jsonc")
     prefs = json.loads(re.sub("//.*", "", open(p, encoding="utf-8").read(), flags=re.MULTILINE))
@@ -290,6 +314,8 @@ if __name__ == "__main__":
     patch_wifi(fw)
     patch_always_send(fw)
     patch_gps_pins(fw)
+    if os.environ.get("TAKWEB_LOWMEM") == "1":  # nur Heltec Wireless Tracker (siehe Workflow)
+        patch_memory(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:
         add_takweb(fw, sys.argv[2])
