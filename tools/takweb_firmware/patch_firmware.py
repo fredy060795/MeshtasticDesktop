@@ -268,31 +268,46 @@ def patch_memory(fw):
     s = open(p, encoding="utf-8").read()
     if "TAKweb: ohne PSRAM" in s:
         print("mesh-pb-constants.h: schon gepatcht")
-        return
+        return patch_http_only(fw)
     anchor = "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n"
     if s.count(anchor) != 1:
         print("mesh-pb-constants.h: Knotenzahl nicht gefunden – unverändert (diese Firmware-Version)")
-        return
+        return patch_http_only(fw)
     s = sub_once(s, "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n",
                  "    if (!psramFound())\n        return 60; // TAKweb: ohne PSRAM Speicher für HTTPS (TAKweb-Seite) lassen\n"
                  "    uint32_t flash_size = ESP.getFlashChipSize() / (1024 * 1024); // Convert Bytes to MB\n",
                  "Knotenzahl (mesh-pb-constants.h)")
     open(p, "w", encoding="utf-8").write(s)
     print("mesh-pb-constants.h: ohne PSRAM 60 Knoten (Speicher für HTTPS)")
-    # HTTPS: eine Verbindung braucht ~40 KB. Meshtastic lässt 2 zu und bearbeitet HTTPS gar nicht mehr, sobald weniger als
-    # 40 KB frei sind – auch die schon offene Verbindung nicht: nach dem ersten Aufbau (71 KB → 28 KB frei) blieb
-    # "GET /" für immer hängen. Auf dem Tracker: 1 Verbindung (der Browser lädt die Dateien nacheinander) und weiter
-    # bearbeiten, solange noch 12 KB frei sind (reicht der Speicher für einen Aufbau nicht, scheitert nur dieser).
+    patch_http_only(fw)
+
+
+def patch_http_only(fw):
+    """Heltec Wireless Tracker: nur http. HTTPS braucht ~40 KB je Verbindung; bei ~70 KB frei hing die Firmware beim
+    verschlüsselten Senden der Seite (App-Verbindung weg, Neustart). Ohne HTTPS-Server und ohne Zertifikat: mehr Speicher,
+    TAKweb kommt über http://192.168.4.1 (die Lite-Seite von TAKweb braucht kein https)."""
     w = os.path.join(fw, "src", "mesh", "http", "WebServer.cpp")
     t = open(w, encoding="utf-8").read()
-    n = 0
-    for old, new in (("static const uint8_t MAX_HTTPS_CONNECTIONS = 2;", "static const uint8_t MAX_HTTPS_CONNECTIONS = 1; // TAKweb: Tracker ohne PSRAM"),
-                     ("static const uint32_t MIN_HEAP_FOR_SSL = 40000;", "static const uint32_t MIN_HEAP_FOR_SSL = 12000; // TAKweb: offene Verbindung weiter bedienen")):
-        if t.count(old) == 1:
-            t = t.replace(old, new)
-            n += 1
-    open(w, "w", encoding="utf-8").write(t)
-    print(f"WebServer.cpp: {n} von 2 HTTPS-Grenzen angepasst (1 Verbindung, weiter ab 12 KB frei)")
+    if "TAKweb: nur http" not in t:
+        t = sub_once(t, "void createSSLCert()\n{\n",
+                     "void createSSLCert()\n{\n    isCertReady = true; // TAKweb: nur http (schwaches Board) – kein Zertifikat\n    return;\n",
+                     "Zertifikat (WebServer.cpp)")
+        t = sub_once(t, "secureServer = new HTTPSServer(cert, 443, MAX_HTTPS_CONNECTIONS);",
+                     "secureServer = nullptr; // TAKweb: nur http (schwaches Board)", "HTTPS-Server (WebServer.cpp)")
+        open(w, "w", encoding="utf-8").write(t)
+    c = os.path.join(fw, "src", "mesh", "http", "ContentHandler.cpp")
+    t = open(c, encoding="utf-8").read()
+    if "if (secureServer) secureServer->registerNode(" not in t:
+        n = t.count("    secureServer->registerNode(")
+        if not n:
+            sys.exit("Patch: secureServer->registerNode nicht gefunden (ContentHandler.cpp)")
+        t = t.replace("    secureServer->registerNode(", "    if (secureServer) secureServer->registerNode(")
+        open(c, "w", encoding="utf-8").write(t)
+    a = os.path.join(fw, "src", "mesh", "wifi", "WiFiAPClient.cpp")
+    t = open(a, encoding="utf-8").read()
+    t = t.replace("offen: https://192.168.4.1 bzw. https://takweb.local", "offen: http://192.168.4.1 bzw. http://takweb.local (nur http)")
+    open(a, "w", encoding="utf-8").write(t)
+    print("WebServer/ContentHandler: nur http – kein HTTPS-Server, kein Zertifikat")
 
 
 def patch_prefs(fw, region="EU_868"):
