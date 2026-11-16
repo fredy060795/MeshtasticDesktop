@@ -89,6 +89,10 @@ jobs:
           key: pio-${{ matrix.env }}-${{ needs.prep.outputs.fw }}
           restore-keys: pio-${{ matrix.env }}-
       - name: Bauen
+        env:
+          # TAKweb-Funkgeräte laufen immer über WLAN (Bluetooth ist dabei ohnehin aus): ohne Bluetooth bleibt auf Boards
+          # ohne PSRAM (Heltec V3, Wireless Tracker) genug Speicher für HTTPS und die TAKweb-Seite
+          PLATFORMIO_BUILD_FLAGS: -DMESHTASTIC_EXCLUDE_BLUETOOTH=1
         run: |
           pip install -U platformio
           cd fw && pio run -e "${{ matrix.env }}" -t mtjson
