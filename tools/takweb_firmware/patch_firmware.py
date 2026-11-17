@@ -343,7 +343,7 @@ if __name__ == "__main__":
     patch_wifi(fw)
     patch_always_send(fw)
     patch_gps_pins(fw)
-    if os.environ.get("TAKWEB_LOWMEM") == "1":  # nur Heltec Wireless Tracker (siehe Workflow)
+    if os.environ.get("TAKWEB_LOWMEM") == "1":  # schwache Boards ohne PSRAM (siehe Workflow)
         patch_memory(fw)
     patch_prefs(fw, region=os.environ.get("TAKWEB_REGION", "EU_868"))
     if len(sys.argv) > 2:

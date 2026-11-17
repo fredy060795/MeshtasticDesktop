@@ -73,9 +73,9 @@ jobs:
             const fs = require('fs');
             // 8 MB boards (ESP32-S3): detailed world map, 4 MB boards (1 MB file system): the small one
             const map = /s3/.test('${{ matrix.env }}') ? 'full' : 'small';
-            // Heltec Wireless Tracker (ohne PSRAM): die TAKweb-Seite als eine Datei (Grundfunktionen), der Rest kommt
+            // schwache Boards ohne PSRAM (Heltec V2/V3/WSL V3, T-Beam, T-LoRa V2, Wireless Tracker): die TAKweb-Seite als eine Datei (Grundfunktionen), der Rest kommt
             // vom TAKweb-Server – sonst reicht der Speicher nicht für die vielen HTTPS-Verbindungen (lib/meshsite.js)
-            const lite = /^heltec-wireless-tracker/.test('${{ matrix.env }}');
+            const lite = ${{ contains(fromJSON('["heltec-v2_0","heltec-v2_1","tbeam","tlora-v2-1-1_6","heltec-v3","heltec-wsl-v3","heltec-wireless-tracker-V1-0","heltec-wireless-tracker","heltec-wireless-tracker-v2"]'), matrix.env) && 'true' || 'false' }};
             const b = require('./lib/meshsite').build(require('./package.json').version, '', map, lite);
             console.log('Weltkarte:', b.map || map, lite ? '(Lite-Seite: eine Datei)' : '');
             for (const f of b.files) fs.writeFileSync('../takweb-static/' + f.name + '.gz', f.gz);
@@ -85,7 +85,7 @@ jobs:
         run: |
           git clone --depth 1 --branch "${{ needs.prep.outputs.fw }}" --recurse-submodules --shallow-submodules \
             https://github.com/meshtastic/firmware fw
-          TAKWEB_LOWMEM="${{ startsWith(matrix.env, 'heltec-wireless-tracker') && '1' || '' }}" \
+          TAKWEB_LOWMEM="${{ contains(fromJSON('["heltec-v2_0","heltec-v2_1","tbeam","tlora-v2-1-1_6","heltec-v3","heltec-wsl-v3","heltec-wireless-tracker-V1-0","heltec-wireless-tracker","heltec-wireless-tracker-v2"]'), matrix.env) && '1' || '' }}" \
           TAKWEB_REGION="${{ github.event.inputs.region || 'EU_868' }}" python tools/takweb_firmware/patch_firmware.py fw takweb-static
       - uses: actions/cache@v4
         with:
@@ -94,9 +94,9 @@ jobs:
           restore-keys: pio-${{ matrix.env }}-
       - name: Bauen
         env:
-          # nur Heltec Wireless Tracker (V1.0/V1.1/V2, ohne PSRAM): ohne Bluetooth (bei TAKweb ohnehin aus, WLAN ist immer
+          # schwache Boards ohne PSRAM (Heltec V2/V3/WSL V3, T-Beam, T-LoRa V2, Wireless Tracker): ohne Bluetooth (bei TAKweb ohnehin aus, WLAN ist immer
           # an) bleibt genug Speicher für HTTPS und die TAKweb-Seite – alle anderen Boards bleiben unverändert
-          PLATFORMIO_BUILD_FLAGS: ${{ startsWith(matrix.env, 'heltec-wireless-tracker') && '-DMESHTASTIC_EXCLUDE_BLUETOOTH=1' || '' }}
+          PLATFORMIO_BUILD_FLAGS: ${{ contains(fromJSON('["heltec-v2_0","heltec-v2_1","tbeam","tlora-v2-1-1_6","heltec-v3","heltec-wsl-v3","heltec-wireless-tracker-V1-0","heltec-wireless-tracker","heltec-wireless-tracker-v2"]'), matrix.env) && '-DMESHTASTIC_EXCLUDE_BLUETOOTH=1' || '' }}
         run: |
           pip install -U platformio
           cd fw && pio run -e "${{ matrix.env }}" -t mtjson
